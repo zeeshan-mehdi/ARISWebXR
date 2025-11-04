@@ -4,11 +4,7 @@
   <meta charset="utf-8" />
   <title>WebXR BPMN MR POC (three.js)</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <style>
-    html,body { height:100%; margin:0; background:#000; color:#fff; font-family: Arial, Helvetica, sans-serif; }
-    #info { position: absolute; left: 12px; top: 12px; z-index: 2; background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius:6px; }
-    canvas { display:block; }
-  </style>
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div id="info">
@@ -24,6 +20,7 @@
   import * as THREE from './js/three.module.js';
   import { ARButton } from './js/ARButton.js';
   import { OrbitControls } from './js/OrbitControls.js';
+  import { createBPMNPanel } from './js/BPMNPanel.js';
 
 
   let camera, scene, renderer;
@@ -114,24 +111,16 @@
     bpmnPanel.position.set(0, 1.2, -1.2);
     bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
     scene.add(bpmnPanel);
-
-    // Desktop drag support
-    let dragging = false, dragOffset = null;
-    renderer.domElement.addEventListener('pointerdown', (e) => {
-      if (!renderer.xr.isPresenting && bpmnPanel.visible) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    // Build a simple panel prefab and show it immediately using the imported function
+    bpmnPanel = createBPMNPanel();
+    bpmnPanel.visible = true;
+    // Place panel at eye level in front of camera
+    bpmnPanel.position.set(0, 1.2, -1.2);
+    bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
+    scene.add(bpmnPanel);
         const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera({x, y}, camera);
         const intersects = raycaster.intersectObject(bpmnPanel, true);
-        if (intersects.length) {
-          dragging = true;
-          dragOffset = intersects[0].point.sub(bpmnPanel.position);
-        }
-      }
-    });
-    renderer.domElement.addEventListener('pointerup', () => { dragging = false; });
-    renderer.domElement.addEventListener('pointermove', (e) => {
       if (dragging && !renderer.xr.isPresenting) {
         const rect = renderer.domElement.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -145,8 +134,7 @@
           bpmnPanel.position.y = intersect.y - (dragOffset ? dragOffset.y : 0);
         }
       }
-    });
-  }
+    }
 
   // Create a simple BPMN-like panel: a thin plane + 3 nodes with text
   function createBPMNPanel() {
