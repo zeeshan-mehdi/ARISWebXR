@@ -67,14 +67,13 @@ export function createBPMNPanel() {
   });
 
   // small instruction text
-  const instrTex = textTexture('Tap nodes to select', 520, 48, 16, 'center');
+  const instrTex = textTexture('Pinch to grab & move', 520, 48, 16, 'center');
   const instrMat = new THREE.MeshBasicMaterial({ map: instrTex, transparent: true });
   const instrQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.08), instrMat);
   instrQuad.position.set(0, -0.28, 0.001);
   group.add(instrQuad);
 
-  // make group face the user by default
-  group.lookAt(new THREE.Vector3(0,1.6,0));
+  // Panel will lie flat on table, no lookAt needed
 
   return group;
 }

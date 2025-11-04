@@ -9,7 +9,7 @@
 <body>
   <div id="info">
     <div style="font-weight:700">WebXR BPMN MR — Quest 3 POC</div>
-    <div style="font-size:12px">Tap to place. Trigger=select. Squeeze/Grip=grab & move nodes or panel.</div>
+    <div style="font-size:12px">Tap to place panel on table. Pinch with hands to grab & move nodes/panel.</div>
   </div>
   <button id="enter-ar-btn" style="position:fixed;top:16px;right:16px;z-index:10;padding:8px 16px;font-size:16px;border-radius:6px;background:#222;color:#fff;border:none;cursor:pointer;">Enter AR</button>
 
@@ -25,6 +25,7 @@
 
   let camera, scene, renderer;
   let controller, controller2;
+  let hand1, hand2; // Hand tracking
   let reticle = null;
   let hitTestSource = null;
   let hitTestSourceRequested = false;
@@ -41,6 +42,7 @@
   let grabbingController = null;
   let grabOffset = new THREE.Vector3();
   let grabRotation = new THREE.Quaternion();
+  let isPinching = false;
 
   init();
   animate();
@@ -51,11 +53,11 @@
   enterARBtn.addEventListener('click', () => {
     if (arButton) {
       arButton.style.display = '';
-      arButton.textContent = 'START AR';
+      arButton.textContent = 'START AR Now';
     } else {
       arButton = ARButton.createButton(renderer, {
-        requiredFeatures: [ 'hit-test', 'anchors' ],
-        optionalFeatures: [ 'dom-overlay', 'hand-tracking', 'layers' ],
+        requiredFeatures: [ 'hit-test', 'local-floor' ],
+        optionalFeatures: [ 'anchors', 'dom-overlay', 'hand-tracking', 'layers' ],
         domOverlay: { root: document.body }
       });
       document.body.appendChild(arButton);
@@ -78,10 +80,10 @@
     renderer.xr.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // AR button - request immersive-ar with hit-test & anchors
+    // AR button - request immersive-ar with hit-test, hand-tracking, and local-floor
     document.body.appendChild(ARButton.createButton(renderer, {
-      requiredFeatures: [ 'hit-test', 'anchors' ],
-      optionalFeatures: [ 'dom-overlay', 'hand-tracking', 'layers' ],
+      requiredFeatures: [ 'hit-test', 'local-floor' ],
+      optionalFeatures: [ 'anchors', 'dom-overlay', 'hand-tracking', 'layers' ],
       domOverlay: { root: document.body }
     }));
 
@@ -116,6 +118,17 @@
     const cursor2 = new THREE.Mesh(cursorGeom.clone(), cursorMat.clone());
     controller2.add(cursor2);
 
+    // Hand tracking for direct hand interactions (Quest 3)
+    hand1 = renderer.xr.getHand(0);
+    hand1.addEventListener('pinchstart', onPinchStart);
+    hand1.addEventListener('pinchend', onPinchEnd);
+    scene.add(hand1);
+
+    hand2 = renderer.xr.getHand(1);
+    hand2.addEventListener('pinchstart', onPinchStart);
+    hand2.addEventListener('pinchend', onPinchEnd);
+    scene.add(hand2);
+
     window.addEventListener('resize', onWindowResize);
 
     // Optional: allow desktop testing with OrbitControls (non-XR)
@@ -124,34 +137,12 @@
     controls.target.set(0,1.6,-1);
     controls.update();
 
-  // Build a simple panel prefab and show it immediately
+  // Build BPMN panel but keep it hidden until placement
     bpmnPanel = createBPMNPanel();
-    bpmnPanel.visible = true;
-    // Place panel at eye level in front of camera
-    bpmnPanel.position.set(0, 1.2, -1.2);
-    bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
+    bpmnPanel.visible = false;
+    // Rotate panel to lie flat on table (rotate 90 degrees around X axis)
+    bpmnPanel.rotation.x = -Math.PI / 2;
     scene.add(bpmnPanel);
-    // Build a simple panel prefab and show it immediately using the imported function
-    bpmnPanel = createBPMNPanel();
-    bpmnPanel.visible = true;
-    // Place panel at eye level in front of camera
-    bpmnPanel.position.set(0, 1.2, -1.2);
-    bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
-    scene.add(bpmnPanel);
-      if (dragging && !renderer.xr.isPresenting) {
-        const rect = renderer.domElement.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera({x, y}, camera);
-        const plane = new THREE.Plane(new THREE.Vector3(0,0,1), bpmnPanel.position.z);
-        const intersect = new THREE.Vector3();
-        raycaster.ray.intersectPlane(plane, intersect);
-        if (intersect) {
-          bpmnPanel.position.x = intersect.x - (dragOffset ? dragOffset.x : 0);
-          bpmnPanel.position.y = intersect.y - (dragOffset ? dragOffset.y : 0);
-        }
-      }
-    }
 
 
   function onWindowResize() {
@@ -183,12 +174,21 @@
           console.warn('Anchor attempt failed (will place without persistent anchor):', err);
         }
 
-        // place panel at reticle
-        bpmnPanel.matrix.copy(reticle.matrix);
-        bpmnPanel.matrix.decompose(bpmnPanel.position, bpmnPanel.quaternion, bpmnPanel.scale);
+        // place panel at reticle position, lying flat
+        const reticlePos = new THREE.Vector3();
+        const reticleQuat = new THREE.Quaternion();
+        const reticleScale = new THREE.Vector3();
+        reticle.matrix.decompose(reticlePos, reticleQuat, reticleScale);
+
+        bpmnPanel.position.copy(reticlePos);
+        // Keep the panel lying flat (don't copy rotation from reticle)
+        // Just rotate to lie flat on surface
+        bpmnPanel.rotation.x = -Math.PI / 2;
+        bpmnPanel.rotation.y = 0;
+        bpmnPanel.rotation.z = 0;
         bpmnPanel.visible = true;
-        // slightly offset panel forward so it's comfortably in front of surface
-        bpmnPanel.translateZ(0.02);
+        // slightly offset upward so it's on top of surface
+        bpmnPanel.position.y += 0.02;
       } else {
         // panel exists — perform selection test: raycast from controller into panel
         // compute controller world ray
@@ -233,7 +233,87 @@
     setTimeout(() => node.remove(ring), 600);
   }
 
-  // Grab/Squeeze handlers for moving objects
+  // Pinch handlers for hand tracking (Quest 3 direct hand interaction)
+  function onPinchStart(event) {
+    if (!bpmnPanel || !bpmnPanel.visible) return;
+
+    const hand = event.target;
+    isPinching = true;
+
+    // Get hand position (pinch point)
+    const handPos = new THREE.Vector3();
+    hand.getWorldPosition(handPos);
+
+    // Check what's near the hand (within grabbing distance)
+    const grabRadius = 0.1; // 10cm grab radius
+
+    // Check each node
+    let closestNode = null;
+    let closestDist = grabRadius;
+
+    bpmnPanel.children.forEach(child => {
+      if (child.userData && child.userData.label) {
+        const nodeWorldPos = new THREE.Vector3();
+        child.getWorldPosition(nodeWorldPos);
+        const dist = handPos.distanceTo(nodeWorldPos);
+
+        if (dist < closestDist) {
+          closestNode = child;
+          closestDist = dist;
+        }
+      }
+    });
+
+    if (closestNode) {
+      // Grab the node
+      grabbedObject = closestNode;
+      grabbingController = hand;
+
+      const objectWorldPos = new THREE.Vector3();
+      closestNode.getWorldPosition(objectWorldPos);
+      grabOffset.subVectors(objectWorldPos, handPos);
+
+      // Visual feedback
+      closestNode.children.forEach(child => {
+        if (child.material && child.material.color) {
+          child.userData.originalColor = child.material.color.getHex();
+          child.material.color.lerp(new THREE.Color(0xffffff), 0.3);
+        }
+      });
+
+      console.log('Hand grabbed node:', closestNode.userData.label);
+    } else {
+      // Check if hand is over panel
+      const panelWorldPos = new THREE.Vector3();
+      bpmnPanel.getWorldPosition(panelWorldPos);
+      const distToPanel = handPos.distanceTo(panelWorldPos);
+
+      if (distToPanel < 0.5) { // 50cm to grab whole panel
+        grabbedObject = bpmnPanel;
+        grabbingController = hand;
+        grabOffset.subVectors(panelWorldPos, handPos);
+        console.log('Hand grabbed entire panel');
+      }
+    }
+  }
+
+  function onPinchEnd(event) {
+    if (grabbedObject && grabbingController === event.target) {
+      // Restore colors
+      grabbedObject.children.forEach(child => {
+        if (child.material && child.userData.originalColor !== undefined) {
+          child.material.color.setHex(child.userData.originalColor);
+        }
+      });
+
+      console.log('Hand released:', grabbedObject.userData ? grabbedObject.userData.label : 'BPMN panel');
+      grabbedObject = null;
+      grabbingController = null;
+      isPinching = false;
+    }
+  }
+
+  // Grab/Squeeze handlers for moving objects (controller-based)
   function onSqueezeStart(event) {
     if (!bpmnPanel || !bpmnPanel.visible) return;
 
