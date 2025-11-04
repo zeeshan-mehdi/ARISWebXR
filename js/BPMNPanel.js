@@ -148,7 +148,7 @@ function textTexture(text, width=512, height=128, fontSize=28, align='left') {
   ctx.fillStyle = 'rgba(0,0,0,0)';
   ctx.fillRect(0,0,width,height);
   ctx.font = `${fontSize}px Arial`;
-  ctx.fillStyle = '#ff0'; // bright yellow for visibility
+  ctx.fillStyle = '#fff'; // white for modern look
   ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   const x = align === 'center' ? width/2 : 12;
