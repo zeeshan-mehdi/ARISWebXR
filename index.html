@@ -524,9 +524,9 @@
 			// Store node references for edge creation
 			const nodeObjects = [];
 			const N = 20;
-			const arcRadius = 1.5;
-			const arcCenterY = 1.2;
-			const arcCenterZ = -1.5;
+			const arcRadius = 2.0;
+			const arcCenterY = 1.4;
+			const arcCenterZ = -3.0;
 			const arcStart = -Math.PI/3; // -60 deg
 			const arcEnd = Math.PI/3;   // +60 deg
 			for (let i = 0; i < N; i++) {
@@ -596,6 +596,7 @@
 				});
 
 				// Camera always looks at arc center
+				camera.position.set(0, arcCenterY, 0.3);
 				camera.lookAt(0, arcCenterY, arcCenterZ);
 				renderer.render( scene, camera );
 			});
