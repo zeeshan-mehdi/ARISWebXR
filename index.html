@@ -9,7 +9,7 @@
 <body>
   <div id="info">
     <div style="font-weight:700">WebXR BPMN MR — Quest 3 POC</div>
-    <div style="font-size:12px">Tap to place the panel. Point & pull trigger / tap node to select.</div>
+    <div style="font-size:12px">Tap to place. Trigger=select. Squeeze/Grip=grab & move nodes or panel.</div>
   </div>
   <button id="enter-ar-btn" style="position:fixed;top:16px;right:16px;z-index:10;padding:8px 16px;font-size:16px;border-radius:6px;background:#222;color:#fff;border:none;cursor:pointer;">Enter AR</button>
 
@@ -20,11 +20,11 @@
   import * as THREE from './js/three.module.js';
   import { ARButton } from './js/ARButton.js';
   import { OrbitControls } from './js/OrbitControls.js';
-  import { createBPMNPanel } from './js/BPMNPanel.js';
+  import { createBPMNPanel, updateArrowPositions } from './js/BPMNPanel.js';
 
 
   let camera, scene, renderer;
-  let controller;
+  let controller, controller2;
   let reticle = null;
   let hitTestSource = null;
   let hitTestSourceRequested = false;
@@ -35,6 +35,12 @@
   const pointer = new THREE.Vector2();
   // Dragging state for desktop drag support
   let dragging = false, dragOffset = null;
+
+  // Grab interaction state
+  let grabbedObject = null;
+  let grabbingController = null;
+  let grabOffset = new THREE.Vector3();
+  let grabRotation = new THREE.Quaternion();
 
   init();
   animate();
@@ -87,16 +93,28 @@
     reticle.visible = false;
     scene.add(reticle);
 
-    // controller for select (trigger/tap)
+    // controller for select (trigger/tap) and grab (squeeze/grip)
     controller = renderer.xr.getController(0);
     controller.addEventListener('select', onSelect);
+    controller.addEventListener('squeezestart', onSqueezeStart);
+    controller.addEventListener('squeezeend', onSqueezeEnd);
     scene.add(controller);
+
+    // Second controller for two-handed manipulation
+    controller2 = renderer.xr.getController(1);
+    controller2.addEventListener('select', onSelect);
+    controller2.addEventListener('squeezestart', onSqueezeStart);
+    controller2.addEventListener('squeezeend', onSqueezeEnd);
+    scene.add(controller2);
 
     // also show a simple cursor for pointer selection in AR
     const cursorGeom = new THREE.SphereGeometry(0.01, 8, 8);
     const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
     const cursor = new THREE.Mesh(cursorGeom, cursorMat);
     controller.add(cursor);
+
+    const cursor2 = new THREE.Mesh(cursorGeom.clone(), cursorMat.clone());
+    controller2.add(cursor2);
 
     window.addEventListener('resize', onWindowResize);
 
@@ -215,6 +233,128 @@
     setTimeout(() => node.remove(ring), 600);
   }
 
+  // Grab/Squeeze handlers for moving objects
+  function onSqueezeStart(event) {
+    if (!bpmnPanel || !bpmnPanel.visible) return;
+
+    const controllerSource = event.target;
+
+    // Raycast from controller to find what we're grabbing
+    const worldPos = new THREE.Vector3();
+    const worldDir = new THREE.Vector3(0, 0, -1);
+    const tempQuat = new THREE.Quaternion();
+
+    controllerSource.getWorldPosition(worldPos);
+    controllerSource.getWorldQuaternion(tempQuat);
+    worldDir.applyQuaternion(tempQuat);
+
+    raycaster.set(worldPos, worldDir);
+
+    // First check if we're grabbing individual nodes
+    const nodeIntersects = raycaster.intersectObjects(bpmnPanel.children, true);
+
+    if (nodeIntersects.length > 0) {
+      // Find the node parent (task/event)
+      let node = nodeIntersects[0].object;
+      while (node && node.parent !== bpmnPanel) node = node.parent;
+
+      if (node && node.userData && node.userData.label) {
+        // Grab individual node
+        grabbedObject = node;
+        grabbingController = controllerSource;
+
+        // Calculate offset from controller to object
+        const objectWorldPos = new THREE.Vector3();
+        node.getWorldPosition(objectWorldPos);
+        grabOffset.subVectors(objectWorldPos, worldPos);
+
+        // Visual feedback - brighten the grabbed object
+        if (node.material) {
+          node.userData.originalEmissive = node.material.emissive ? node.material.emissive.getHex() : 0x000000;
+          node.material.emissive = new THREE.Color(0x44ff44);
+        }
+        node.children.forEach(child => {
+          if (child.material && child.material.color) {
+            child.userData.originalColor = child.material.color.getHex();
+            child.material.color.lerp(new THREE.Color(0xffffff), 0.3);
+          }
+        });
+
+        console.log('Grabbed node:', node.userData.label);
+        return;
+      }
+    }
+
+    // If we didn't grab a node, check if we're grabbing the panel itself
+    const panelIntersects = raycaster.intersectObject(bpmnPanel, true);
+    if (panelIntersects.length > 0) {
+      // Grab entire panel
+      grabbedObject = bpmnPanel;
+      grabbingController = controllerSource;
+
+      const panelWorldPos = new THREE.Vector3();
+      bpmnPanel.getWorldPosition(panelWorldPos);
+      grabOffset.subVectors(panelWorldPos, worldPos);
+
+      bpmnPanel.getWorldQuaternion(grabRotation);
+
+      console.log('Grabbed entire BPMN panel');
+    }
+  }
+
+  function onSqueezeEnd(event) {
+    if (grabbedObject && grabbingController === event.target) {
+      // Restore original colors
+      if (grabbedObject.material && grabbedObject.userData.originalEmissive !== undefined) {
+        grabbedObject.material.emissive = new THREE.Color(grabbedObject.userData.originalEmissive);
+      }
+      grabbedObject.children.forEach(child => {
+        if (child.material && child.userData.originalColor !== undefined) {
+          child.material.color.setHex(child.userData.originalColor);
+        }
+      });
+
+      console.log('Released:', grabbedObject.userData ? grabbedObject.userData.label : 'BPMN panel');
+      grabbedObject = null;
+      grabbingController = null;
+    }
+  }
+
+  // Update grabbed object position during animation loop
+  function updateGrabbedObject() {
+    if (grabbedObject && grabbingController) {
+      const controllerWorldPos = new THREE.Vector3();
+      const controllerWorldQuat = new THREE.Quaternion();
+
+      grabbingController.getWorldPosition(controllerWorldPos);
+      grabbingController.getWorldQuaternion(controllerWorldQuat);
+
+      // Calculate new position with offset
+      const newPos = new THREE.Vector3().copy(controllerWorldPos).add(
+        grabOffset.clone().applyQuaternion(controllerWorldQuat)
+      );
+
+      if (grabbedObject === bpmnPanel) {
+        // Move entire panel
+        bpmnPanel.position.copy(newPos);
+      } else {
+        // Move individual node (relative to panel)
+        const panelWorldMatrix = new THREE.Matrix4();
+        bpmnPanel.matrixWorld.decompose(
+          new THREE.Vector3(),
+          new THREE.Quaternion(),
+          new THREE.Vector3()
+        );
+
+        // Convert world position to panel-local position
+        const panelInverseMatrix = new THREE.Matrix4().copy(bpmnPanel.matrixWorld).invert();
+        const localPos = newPos.clone().applyMatrix4(panelInverseMatrix);
+
+        grabbedObject.position.copy(localPos);
+      }
+    }
+  }
+
   // animation loop
   function animate() {
     renderer.setAnimationLoop(render);
@@ -256,6 +396,14 @@
       } else {
         reticle.visible = false;
       }
+    }
+
+    // Update grabbed object position
+    updateGrabbedObject();
+
+    // Update arrow positions if nodes have been moved
+    if (bpmnPanel && bpmnPanel.visible) {
+      updateArrowPositions(bpmnPanel);
     }
 
     renderer.render(scene, camera);

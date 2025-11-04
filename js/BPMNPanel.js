@@ -21,6 +21,7 @@ export function createBPMNPanel() {
   ];
 
   const startX = -0.64;
+  const nodeCards = [];
   nodes.forEach((n, i) => {
     let card;
     if (n.type === 'event') {
@@ -31,11 +32,37 @@ export function createBPMNPanel() {
     card.position.set(startX + i * 0.32, 0, 0.01);
     card.userData = { id: n.id, label: n.label, type: n.type };
     group.add(card);
+    nodeCards.push(card);
+
     // Add arrow between nodes except after last
     if (i < nodes.length - 1) {
       const arrow = createArrow();
       arrow.position.set(startX + i * 0.32 + 0.16, 0, 0.011);
+      // Store references to connected nodes for dynamic updates
+      arrow.userData = {
+        fromNode: card,
+        toNode: null, // will be set in next iteration
+        isArrow: true
+      };
       group.add(arrow);
+
+      // Link arrow to previous node if exists
+      if (i > 0) {
+        const prevArrow = group.children[group.children.length - 2];
+        if (prevArrow.userData && prevArrow.userData.isArrow) {
+          prevArrow.userData.toNode = card;
+        }
+      }
+    }
+  });
+
+  // Second pass to link last arrow properly
+  group.children.forEach(child => {
+    if (child.userData && child.userData.isArrow && !child.userData.toNode) {
+      const fromIndex = nodeCards.indexOf(child.userData.fromNode);
+      if (fromIndex >= 0 && fromIndex < nodeCards.length - 1) {
+        child.userData.toNode = nodeCards[fromIndex + 1];
+      }
     }
   });
 
@@ -50,6 +77,34 @@ export function createBPMNPanel() {
   group.lookAt(new THREE.Vector3(0,1.6,0));
 
   return group;
+}
+
+// Function to update arrow positions based on node positions
+export function updateArrowPositions(bpmnPanel) {
+  if (!bpmnPanel) return;
+
+  bpmnPanel.children.forEach(child => {
+    if (child.userData && child.userData.isArrow) {
+      const fromNode = child.userData.fromNode;
+      const toNode = child.userData.toNode;
+
+      if (fromNode && toNode) {
+        // Calculate midpoint between the two nodes
+        const midX = (fromNode.position.x + toNode.position.x) / 2;
+        const midY = (fromNode.position.y + toNode.position.y) / 2;
+        const midZ = (fromNode.position.z + toNode.position.z) / 2;
+
+        // Update arrow position
+        child.position.set(midX, midY, midZ + 0.001);
+
+        // Optional: rotate arrow to point in the right direction
+        const dx = toNode.position.x - fromNode.position.x;
+        const dy = toNode.position.y - fromNode.position.y;
+        const angle = Math.atan2(dy, dx);
+        child.rotation.z = angle;
+      }
+    }
+  });
 }
 
 // Task node: rounded rectangle + label
