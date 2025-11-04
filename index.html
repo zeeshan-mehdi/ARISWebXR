@@ -108,12 +108,44 @@
     controls.update();
 
   // Build a simple panel prefab and show it immediately
-  bpmnPanel = createBPMNPanel();
-  bpmnPanel.visible = true;
-  // Place panel in front of camera by default
-  bpmnPanel.position.set(0, 1.4, -1.2);
-  bpmnPanel.lookAt(camera.position);
-  scene.add(bpmnPanel);
+    bpmnPanel = createBPMNPanel();
+    bpmnPanel.visible = true;
+    // Place panel at eye level in front of camera
+    bpmnPanel.position.set(0, 1.2, -1.2);
+    bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
+    scene.add(bpmnPanel);
+
+    // Desktop drag support
+    let dragging = false, dragOffset = null;
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (!renderer.xr.isPresenting && bpmnPanel.visible) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera({x, y}, camera);
+        const intersects = raycaster.intersectObject(bpmnPanel, true);
+        if (intersects.length) {
+          dragging = true;
+          dragOffset = intersects[0].point.sub(bpmnPanel.position);
+        }
+      }
+    });
+    renderer.domElement.addEventListener('pointerup', () => { dragging = false; });
+    renderer.domElement.addEventListener('pointermove', (e) => {
+      if (dragging && !renderer.xr.isPresenting) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera({x, y}, camera);
+        const plane = new THREE.Plane(new THREE.Vector3(0,0,1), bpmnPanel.position.z);
+        const intersect = new THREE.Vector3();
+        raycaster.ray.intersectPlane(plane, intersect);
+        if (intersect) {
+          bpmnPanel.position.x = intersect.x - (dragOffset ? dragOffset.x : 0);
+          bpmnPanel.position.y = intersect.y - (dragOffset ? dragOffset.y : 0);
+        }
+      }
+    });
   }
 
   // Create a simple BPMN-like panel: a thin plane + 3 nodes with text
@@ -227,21 +259,21 @@
 
   // helper: create a canvas texture with text
   function textTexture(text, width=512, height=128, fontSize=28, align='left') {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = 'rgba(0,0,0,0)';
-    ctx.fillRect(0,0,width,height);
-    ctx.font = `${fontSize}px Arial`;
-    ctx.fillStyle = '#fff';
-    ctx.textAlign = align;
-    ctx.textBaseline = 'middle';
-    const x = align === 'center' ? width/2 : 12;
-    ctx.fillText(text, x, height/2);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0,0,width,height);
+  ctx.font = `${fontSize}px Arial`;
+  ctx.fillStyle = '#ff0'; // bright yellow for visibility
+  ctx.textAlign = align;
+  ctx.textBaseline = 'middle';
+  const x = align === 'center' ? width/2 : 12;
+  ctx.fillText(text, x, height/2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
   }
 
   function onWindowResize() {
