@@ -523,8 +523,20 @@
 
 			// Store node references for edge creation
 			const nodeObjects = [];
-			for ( let i = 0; i < 20; i ++ ) {
+			const N = 20;
+			const arcRadius = 1.5;
+			const arcCenterY = 1.2;
+			const arcCenterZ = -1.5;
+			const arcStart = -Math.PI/3; // -60 deg
+			const arcEnd = Math.PI/3;   // +60 deg
+			for (let i = 0; i < N; i++) {
+				const t = i / (N-1);
+				const theta = arcStart + t * (arcEnd - arcStart);
+				const x = arcRadius * Math.sin(theta);
+				const y = arcCenterY;
+				const z = arcCenterZ + arcRadius * (1 - Math.cos(theta));
 				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
+				object.position.set(x, y, z);
 				// Add a text label to the box
 				const label = createText( `Box ${i+1}`, 0.04 );
 				label.position.set( 0, 0, 0.09 );
@@ -569,23 +581,22 @@
 				edgeObjects.forEach(edge => {
 					const from = edge.userData.from;
 					const to = edge.userData.to;
-					// Get world positions
 					from.updateMatrixWorld();
 					to.updateMatrixWorld();
 					const fromPos = new THREE.Vector3();
 					const toPos = new THREE.Vector3();
 					from.getWorldPosition(fromPos);
 					to.getWorldPosition(toPos);
-					// Set edge position to midpoint
 					const mid = fromPos.clone().lerp(toPos, 0.5);
 					edge.position.copy(mid);
-					// Set edge orientation
 					const diff = toPos.clone().sub(fromPos);
-					edge.scale.set(1, diff.length() / 1, 1); // scale Y to match length
+					edge.scale.set(1, diff.length() / 1, 1);
 					edge.lookAt(toPos);
-					edge.rotateX(Math.PI / 2); // align cylinder axis
+					edge.rotateX(Math.PI / 2);
 				});
 
+				// Camera always looks at arc center
+				camera.lookAt(0, arcCenterY, arcCenterZ);
 				renderer.render( scene, camera );
 			});
 
