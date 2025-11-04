@@ -520,9 +520,15 @@
 				.registerSystem( DraggableSystem )
 				.registerSystem( HandRaySystem, { handPointers: [ handPointer1, handPointer2 ] } );
 
-			for ( let i = 0; i < 20; i ++ ) {
 
+			for ( let i = 0; i < 20; i ++ ) {
 				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
+
+				// Add a text label to the box
+				const label = createText( `Box ${i+1}`, 0.04 );
+				label.position.set( 0, 0, 0.09 ); // Slightly in front of the box face
+				object.add( label );
+
 				scene.add( object );
 
 				const entity = world.createEntity();
@@ -530,7 +536,6 @@
 				entity.addComponent( Randomizable );
 				entity.addComponent( Object3D, { object: object } );
 				entity.addComponent( Draggable );
-
 			}
 
 			const menuEntity = world.createEntity();
