@@ -35,13 +35,11 @@
   let raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   // Dragging state for desktop drag support
-  let dragging = false, dragOffset = null;
-
-  // Grab interaction state
-  let grabbedObject = null;
-  let grabbingController = null;
-  let grabOffset = new THREE.Vector3();
-  let grabRotation = new THREE.Quaternion();
+  // Drag/grab state for AR hand/controller interaction
+  let grabbedObject = null; // The object being grabbed (node or panel)
+  let grabbingController = null; // The hand or controller doing the grabbing
+  let grabOffset = new THREE.Vector3(); // Offset from hand/controller to object
+  let grabRotation = new THREE.Quaternion(); // For panel rotation (if needed)
   let isPinching = false;
 
   init();
@@ -455,15 +453,5 @@
     reticle.visible = false;
 
     // Update grabbed object position
-    updateGrabbedObject();
-
-    // Update arrow positions if nodes have been moved
-    if (bpmnPanel && bpmnPanel.visible) {
-      updateArrowPositions(bpmnPanel);
-    }
-
-    renderer.render(scene, camera);
-  }
-  </script>
-</body>
-</html>
+  updateGrabbedObject();
+}
