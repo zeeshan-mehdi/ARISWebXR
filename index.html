@@ -33,6 +33,8 @@
   let tempMatrix = new THREE.Matrix4();
   let raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
+  // Dragging state for desktop drag support
+  let dragging = false, dragOffset = null;
 
   init();
   animate();
@@ -118,9 +120,6 @@
     bpmnPanel.position.set(0, 1.2, -1.2);
     bpmnPanel.lookAt(new THREE.Vector3(0, 1.2, 0));
     scene.add(bpmnPanel);
-        const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-        raycaster.setFromCamera({x, y}, camera);
-        const intersects = raycaster.intersectObject(bpmnPanel, true);
       if (dragging && !renderer.xr.isPresenting) {
         const rect = renderer.domElement.getBoundingClientRect();
         const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
