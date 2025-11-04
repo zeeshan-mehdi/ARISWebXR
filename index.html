@@ -95,28 +95,44 @@
     reticle.visible = false; // Keep hidden
     scene.add(reticle);
 
-    // controller for select (trigger/tap) and grab (squeeze/grip)
-    controller = renderer.xr.getController(0);
-    controller.addEventListener('select', onSelect);
-    controller.addEventListener('squeezestart', onSqueezeStart);
-    controller.addEventListener('squeezeend', onSqueezeEnd);
-    scene.add(controller);
+  // controller for select (trigger/tap) and grab (squeeze/grip)
+  controller = renderer.xr.getController(0);
+  controller.addEventListener('select', onSelect);
+  controller.addEventListener('squeezestart', onSqueezeStart);
+  controller.addEventListener('squeezeend', onSqueezeEnd);
+  scene.add(controller);
 
-    // Second controller for two-handed manipulation
-    controller2 = renderer.xr.getController(1);
-    controller2.addEventListener('select', onSelect);
-    controller2.addEventListener('squeezestart', onSqueezeStart);
-    controller2.addEventListener('squeezeend', onSqueezeEnd);
-    scene.add(controller2);
+  // Add visible ray for controller 0
+  const rayGeom = new THREE.CylinderGeometry(0.003, 0.003, 1.2, 8);
+  const rayMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, opacity: 0.7, transparent: true });
+  const rayMesh = new THREE.Mesh(rayGeom, rayMat);
+  rayMesh.position.set(0, 0, -0.6);
+  rayMesh.rotation.x = Math.PI / 2;
+  controller.add(rayMesh);
 
-    // also show a simple cursor for pointer selection in AR
-    const cursorGeom = new THREE.SphereGeometry(0.01, 8, 8);
-    const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-    const cursor = new THREE.Mesh(cursorGeom, cursorMat);
-    controller.add(cursor);
+  // Second controller for two-handed manipulation
+  controller2 = renderer.xr.getController(1);
+  controller2.addEventListener('select', onSelect);
+  controller2.addEventListener('squeezestart', onSqueezeStart);
+  controller2.addEventListener('squeezeend', onSqueezeEnd);
+  scene.add(controller2);
 
-    const cursor2 = new THREE.Mesh(cursorGeom.clone(), cursorMat.clone());
-    controller2.add(cursor2);
+  // Add visible ray for controller 1
+  const rayMesh2 = new THREE.Mesh(rayGeom.clone(), rayMat.clone());
+  rayMesh2.position.set(0, 0, -0.6);
+  rayMesh2.rotation.x = Math.PI / 2;
+  controller2.add(rayMesh2);
+
+  // also show a simple cursor for pointer selection in AR
+  const cursorGeom = new THREE.SphereGeometry(0.01, 8, 8);
+  const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+  const cursor = new THREE.Mesh(cursorGeom, cursorMat);
+  cursor.position.set(0, 0, -1.2);
+  controller.add(cursor);
+
+  const cursor2 = new THREE.Mesh(cursorGeom.clone(), cursorMat.clone());
+  cursor2.position.set(0, 0, -1.2);
+  controller2.add(cursor2);
 
     // Hand tracking for direct hand interactions (Quest 3)
     hand1 = renderer.xr.getHand(0);
@@ -154,13 +170,12 @@
     controls.update();
 
     // Build BPMN panel and make it always visible
-    bpmnPanel = createBPMNPanel();
-    bpmnPanel.visible = true;
-    // Position panel upright at eye level, directly in front of camera
-    bpmnPanel.position.set(0, 1.2, -1.2);
-    bpmnPanel.rotation.set(0, 0, 0); // upright
-    bpmnPanel.lookAt(camera.position.x, camera.position.y, camera.position.z);
-    scene.add(bpmnPanel);
+  bpmnPanel = createBPMNPanel();
+  bpmnPanel.visible = true;
+  // For AR: place panel at table height (Y=0.8), in front of user (Z=-1.2), upright
+  bpmnPanel.position.set(0, 0.8, -1.2);
+  bpmnPanel.rotation.set(0, 0, 0); // upright
+  scene.add(bpmnPanel);
 }
 
   function onWindowResize() {
