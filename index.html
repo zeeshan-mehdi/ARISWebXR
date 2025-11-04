@@ -521,12 +521,17 @@
 				.registerSystem( HandRaySystem, { handPointers: [ handPointer1, handPointer2 ] } );
 
 
+
+			// Create a group for the graph (nodes + edges)
+			const graphGroup = new THREE.Group();
+			scene.add(graphGroup);
+
 			// Store node references for edge creation
 			const nodeObjects = [];
 			const N = 20;
 			const lineSpacing = 0.22;
 			const lineY = 1.4;
-			const lineZ = -2.5;
+			const lineZ = -1.5; // Place graph 1.5m in front of user (relative to XR rig)
 			for (let i = 0; i < N; i++) {
 				const x = (i - (N-1)/2) * lineSpacing;
 				const y = lineY;
@@ -537,7 +542,7 @@
 				const label = createText( `Box ${i+1}`, 0.04 );
 				label.position.set( 0, 0, 0.09 );
 				object.add( label );
-				scene.add( object );
+				graphGroup.add( object );
 				nodeObjects.push(object);
 				const entity = world.createEntity();
 				entity.addComponent( Intersectable );
@@ -560,10 +565,32 @@
 				const shadow = new THREE.Mesh(edgeGeom.clone(), shadowMat);
 				shadow.position.set(0, -0.03, 0);
 				edge.add(shadow);
-				scene.add(edge);
+				graphGroup.add(edge);
 				edge.userData = { from, to };
 				edgeObjects.push(edge);
 			}
+
+			// Helper: Attach graphGroup to XR rig on session start
+			renderer.xr.addEventListener('sessionstart', () => {
+				// Parent the graph group to the XR rig (camera's parent)
+				const xrCamera = renderer.xr.getCamera();
+				const rig = xrCamera.parent;
+				if (rig && graphGroup.parent !== rig) {
+					rig.add(graphGroup);
+					// Place graph in front of user (relative to rig)
+					graphGroup.position.set(0, 1.4, -1.5);
+					graphGroup.rotation.set(0, 0, 0);
+				}
+			});
+
+			// On session end, reparent graphGroup to scene
+			renderer.xr.addEventListener('sessionend', () => {
+				if (graphGroup.parent !== scene) {
+					scene.add(graphGroup);
+					graphGroup.position.set(0, 0, 0);
+					graphGroup.rotation.set(0, 0, 0);
+				}
+			});
 
 			// Update edges every frame to follow nodes
 			renderer.setAnimationLoop(function animate() {
@@ -591,9 +618,12 @@
 					edge.rotateX(Math.PI / 2);
 				});
 
-				// Camera always looks at the center of the line
-				camera.position.set(0, lineY, 0.3);
-				camera.lookAt(0, lineY, lineZ);
+				// Remove manual camera positioning in XR; let XR rig handle camera
+				// Only update camera in non-XR mode
+				if (!renderer.xr.isPresenting) {
+					camera.position.set(0, lineY, 0.3);
+					camera.lookAt(0, lineY, lineZ);
+				}
 				renderer.render( scene, camera );
 			});
 
