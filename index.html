@@ -120,13 +120,7 @@
   function createBPMNPanel() {
     const group = new THREE.Group();
 
-    // Panel backing (slightly translucent)
-    const panelGeo = new THREE.PlaneGeometry(1.6, 0.7);
-    const panelMat = new THREE.MeshBasicMaterial({ color: 0x111827, opacity: 0.85, transparent: true, side: THREE.DoubleSide });
-    const panel = new THREE.Mesh(panelGeo, panelMat);
-    panel.position.set(0, 0, 0);
-    panel.rotation.x = 0;
-    group.add(panel);
+  // Panel backing removed for full transparency
 
     // Title (canvas texture)
     const titleTex = textTexture('Simple BPMN Process', 520, 64, 24, 'center');
