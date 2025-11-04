@@ -107,10 +107,13 @@
     controls.target.set(0,1.6,-1);
     controls.update();
 
-    // Build a simple panel prefab but keep it hidden until placed
-    bpmnPanel = createBPMNPanel();
-    bpmnPanel.visible = false;
-    scene.add(bpmnPanel);
+  // Build a simple panel prefab and show it immediately
+  bpmnPanel = createBPMNPanel();
+  bpmnPanel.visible = true;
+  // Place panel in front of camera by default
+  bpmnPanel.position.set(0, 1.4, -1.2);
+  bpmnPanel.lookAt(camera.position);
+  scene.add(bpmnPanel);
   }
 
   // Create a simple BPMN-like panel: a thin plane + 3 nodes with text
