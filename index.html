@@ -422,6 +422,9 @@
 
 			container.appendChild( renderer.domElement );
 
+			// Set reference space to 'local' to avoid floor/bounds constraints
+			renderer.xr.setReferenceSpaceType('local');
+
 			const sessionInit = {
 				requiredFeatures: [ 'hand-tracking' ]
 			};
@@ -577,8 +580,8 @@
 				const rig = xrCamera.parent;
 				if (rig && graphGroup.parent !== rig) {
 					rig.add(graphGroup);
-					// Place graph in front of user (relative to rig)
-					graphGroup.position.set(0, 1.4, -1.5);
+					// Place graph in front of user (relative to rig), slightly below eye level
+					graphGroup.position.set(0, -0.15, -1.5);
 					graphGroup.rotation.set(0, 0, 0);
 				}
 			});
