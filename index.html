@@ -521,22 +521,73 @@
 				.registerSystem( HandRaySystem, { handPointers: [ handPointer1, handPointer2 ] } );
 
 
+			// Store node references for edge creation
+			const nodeObjects = [];
 			for ( let i = 0; i < 20; i ++ ) {
 				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
-
 				// Add a text label to the box
 				const label = createText( `Box ${i+1}`, 0.04 );
-				label.position.set( 0, 0, 0.09 ); // Slightly in front of the box face
+				label.position.set( 0, 0, 0.09 );
 				object.add( label );
-
 				scene.add( object );
-
+				nodeObjects.push(object);
 				const entity = world.createEntity();
 				entity.addComponent( Intersectable );
 				entity.addComponent( Randomizable );
 				entity.addComponent( Object3D, { object: object } );
 				entity.addComponent( Draggable );
 			}
+
+			// Create undirected edges (chain: Box 1—Box 2—...—Box 20)
+			const edgeObjects = [];
+			for (let i = 0; i < nodeObjects.length - 1; i++) {
+				const from = nodeObjects[i];
+				const to = nodeObjects[i+1];
+				// Cylinder for edge
+				const edgeGeom = new THREE.CylinderGeometry(0.025, 0.025, 1, 12);
+				const edgeMat = new THREE.MeshPhongMaterial({ color: 0xffc107, opacity: 0.85, transparent: true });
+				const edge = new THREE.Mesh(edgeGeom, edgeMat);
+				// Drop shadow (like arrows)
+				const shadowMat = new THREE.MeshPhongMaterial({ color: 0x000000, opacity: 0.18, transparent: true });
+				const shadow = new THREE.Mesh(edgeGeom.clone(), shadowMat);
+				shadow.position.set(0, -0.03, 0);
+				edge.add(shadow);
+				scene.add(edge);
+				edge.userData = { from, to };
+				edgeObjects.push(edge);
+			}
+
+			// Update edges every frame to follow nodes
+			renderer.setAnimationLoop(function animate() {
+				// Update ECS world and render as before
+				const delta = clock.getDelta();
+				const elapsedTime = clock.elapsedTime;
+				renderer.xr.updateCamera( camera );
+				world.execute( delta, elapsedTime );
+
+				// Update edge positions
+				edgeObjects.forEach(edge => {
+					const from = edge.userData.from;
+					const to = edge.userData.to;
+					// Get world positions
+					from.updateMatrixWorld();
+					to.updateMatrixWorld();
+					const fromPos = new THREE.Vector3();
+					const toPos = new THREE.Vector3();
+					from.getWorldPosition(fromPos);
+					to.getWorldPosition(toPos);
+					// Set edge position to midpoint
+					const mid = fromPos.clone().lerp(toPos, 0.5);
+					edge.position.copy(mid);
+					// Set edge orientation
+					const diff = toPos.clone().sub(fromPos);
+					edge.scale.set(1, diff.length() / 1, 1); // scale Y to match length
+					edge.lookAt(toPos);
+					edge.rotateX(Math.PI / 2); // align cylinder axis
+				});
+
+				renderer.render( scene, camera );
+			});
 
 			const menuEntity = world.createEntity();
 			menuEntity.addComponent( Intersectable );
