@@ -524,17 +524,13 @@
 			// Store node references for edge creation
 			const nodeObjects = [];
 			const N = 20;
-			const arcRadius = 2.0;
-			const arcCenterY = 1.4;
-			const arcCenterZ = -3.0;
-			const arcStart = -Math.PI/3; // -60 deg
-			const arcEnd = Math.PI/3;   // +60 deg
+			const lineSpacing = 0.22;
+			const lineY = 1.4;
+			const lineZ = -2.5;
 			for (let i = 0; i < N; i++) {
-				const t = i / (N-1);
-				const theta = arcStart + t * (arcEnd - arcStart);
-				const x = arcRadius * Math.sin(theta);
-				const y = arcCenterY;
-				const z = arcCenterZ + arcRadius * (1 - Math.cos(theta));
+				const x = (i - (N-1)/2) * lineSpacing;
+				const y = lineY;
+				const z = lineZ;
 				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
 				object.position.set(x, y, z);
 				// Add a text label to the box
@@ -595,9 +591,9 @@
 					edge.rotateX(Math.PI / 2);
 				});
 
-				// Camera always looks at arc center
-				camera.position.set(0, arcCenterY, 0.3);
-				camera.lookAt(0, arcCenterY, arcCenterZ);
+				// Camera always looks at the center of the line
+				camera.position.set(0, lineY, 0.3);
+				camera.lookAt(0, lineY, lineZ);
 				renderer.render( scene, camera );
 			});
 
