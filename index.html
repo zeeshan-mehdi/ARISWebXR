@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>WebXR BPMN MR POC (three.js)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html,body { height:100%; margin:0; background:#000; color:#fff; font-family: Arial, Helvetica, sans-serif; }
+    #info { position: absolute; left: 12px; top: 12px; z-index: 2; background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius:6px; }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="info">
+    <div style="font-weight:700">WebXR BPMN MR — Quest 3 POC</div>
+    <div style="font-size:12px">Tap to place the panel. Point & pull trigger / tap node to select.</div>
+  </div>
+
+  <script type="module">
+  import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+  import { ARButton } from 'https://unpkg.com/three@0.152.2/examples/jsm/webxr/ARButton.js';
+  import { OrbitControls } from 'https://unpkg.com/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+
+  let camera, scene, renderer;
+  let controller;
+  let reticle = null;
+  let hitTestSource = null;
+  let hitTestSourceRequested = false;
+  let anchorObjects = []; // keep anchors if created
+  let bpmnPanel = null;
+  let tempMatrix = new THREE.Matrix4();
+  let raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+
+  init();
+  animate();
+
+  function init() {
+    // basic scene
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
+
+    // light
+    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+    scene.add(light);
+
+    // renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    document.body.appendChild(renderer.domElement);
+
+    // AR button - request immersive-ar with hit-test & anchors
+    document.body.appendChild(ARButton.createButton(renderer, {
+      requiredFeatures: [ 'hit-test', 'anchors' ],
+      optionalFeatures: [ 'dom-overlay', 'hand-tracking', 'layers' ],
+      domOverlay: { root: document.body }
+    }));
+
+    // Reticle for placement
+    const geometry = new THREE.RingGeometry(0.08, 0.10, 32).rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicMaterial({ color: 0x00FF88, opacity: 0.9, transparent: true });
+    reticle = new THREE.Mesh(geometry, material);
+    reticle.matrixAutoUpdate = false;
+    reticle.visible = false;
+    scene.add(reticle);
+
+    // controller for select (trigger/tap)
+    controller = renderer.xr.getController(0);
+    controller.addEventListener('select', onSelect);
+    scene.add(controller);
+
+    // also show a simple cursor for pointer selection in AR
+    const cursorGeom = new THREE.SphereGeometry(0.01, 8, 8);
+    const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+    const cursor = new THREE.Mesh(cursorGeom, cursorMat);
+    controller.add(cursor);
+
+    window.addEventListener('resize', onWindowResize);
+
+    // Optional: allow desktop testing with OrbitControls (non-XR)
+    const controls = new OrbitControls(camera, renderer.domElement);
+    camera.position.set(0,1.6,0);
+    controls.target.set(0,1.6,-1);
+    controls.update();
+
+    // Build a simple panel prefab but keep it hidden until placed
+    bpmnPanel = createBPMNPanel();
+    bpmnPanel.visible = false;
+    scene.add(bpmnPanel);
+  }
+
+  // Create a simple BPMN-like panel: a thin plane + 3 nodes with text
+  function createBPMNPanel() {
+    const group = new THREE.Group();
+
+    // Panel backing (slightly translucent)
+    const panelGeo = new THREE.PlaneGeometry(1.2, 0.7);
+    const panelMat = new THREE.MeshBasicMaterial({ color: 0x111827, opacity: 0.85, transparent: true, side: THREE.DoubleSide });
+    const panel = new THREE.Mesh(panelGeo, panelMat);
+    panel.position.set(0, 0, 0);
+    panel.rotation.x = 0;
+    group.add(panel);
+
+    // Title (canvas texture)
+    const titleTex = textTexture('Process: Order -> Approve', 520, 64, 24, 'center');
+    const titleMat = new THREE.MeshBasicMaterial({ map: titleTex, transparent: true });
+    const titleQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.12), titleMat);
+    titleQuad.position.set(0, 0.26, 0.001);
+    group.add(titleQuad);
+
+    // Create 3 node cards horizontally
+    const nodes = [
+      { id: 'n1', label: 'Receive Order' },
+      { id: 'n2', label: 'Check Stock' },
+      { id: 'n3', label: 'Send Confirmation' }
+    ];
+
+    const startX = -0.4;
+    nodes.forEach((n, i) => {
+      const card = createNodeCard(n.label);
+      card.position.set(startX + i * 0.4, 0, 0.01);
+      card.userData = { id: n.id, label: n.label };
+      group.add(card);
+    });
+
+    // small instruction text
+    const instrTex = textTexture('Tap nodes to select', 520, 48, 16, 'center');
+    const instrMat = new THREE.MeshBasicMaterial({ map: instrTex, transparent: true });
+    const instrQuad = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.08), instrMat);
+    instrQuad.position.set(0, -0.28, 0.001);
+    group.add(instrQuad);
+
+    // make group face the user by default
+    group.lookAt(new THREE.Vector3(0,1.6,0));
+
+    return group;
+  }
+
+  function createNodeCard(text) {
+    const tex = textTexture(text, 256, 128, 20, 'center');
+    const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true });
+    const geo = new THREE.PlaneGeometry(0.3, 0.18);
+    const mesh = new THREE.Mesh(geo, mat);
+    // add a thin border
+    const outline = new THREE.Mesh(new THREE.PlaneGeometry(0.305, 0.185), new THREE.MeshBasicMaterial({ color:0x000000, opacity:0.3, transparent:true }));
+    outline.position.set(0,0,-0.001);
+    mesh.add(outline);
+    return mesh;
+  }
+
+  // helper: create a canvas texture with text
+  function textTexture(text, width=512, height=128, fontSize=28, align='left') {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(0,0,0,0)';
+    ctx.fillRect(0,0,width,height);
+    ctx.font = `${fontSize}px Arial`;
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = align;
+    ctx.textBaseline = 'middle';
+    const x = align === 'center' ? width/2 : 12;
+    ctx.fillText(text, x, height/2);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }
+
+  function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  // called when user taps/selects to place panel or interact
+  async function onSelect() {
+    const session = renderer.xr.getSession();
+    if (!session) return;
+
+    // If reticle visible -> place or toggle selection
+    if (reticle.visible) {
+      // If panel is not yet placed -> create anchor (if possible) and place it
+      if (!bpmnPanel.visible) {
+        // try to create an anchor from the reticle's matrix
+        try {
+          // WebXR: if hitTest gave an XRHitTestResult with createAnchor, that would be used.
+          // As fallback, create anchor from current transform using XRSession.requestAnimationFrame pose.
+          const viewerRefSpace = await session.requestReferenceSpace('local');
+          // Try XRAnchor via three.js helper - not standardized in three.js directly, so use session.requestAnchor if available
+          if (session.requestAnchor) {
+            // Some runtimes provide session.requestAnchor({space: viewerRefSpace}) - optional and experimental.
+            // We'll instead attempt to use the hit test createAnchor if available via last frame results
+          }
+        } catch (err) {
+          console.warn('Anchor attempt failed (will place without persistent anchor):', err);
+        }
+
+        // place panel at reticle
+        bpmnPanel.matrix.copy(reticle.matrix);
+        bpmnPanel.matrix.decompose(bpmnPanel.position, bpmnPanel.quaternion, bpmnPanel.scale);
+        bpmnPanel.visible = true;
+        // slightly offset panel forward so it's comfortably in front of surface
+        bpmnPanel.translateZ(0.02);
+      } else {
+        // panel exists — perform selection test: raycast from controller into panel
+        // compute controller world ray
+        const controllerGrip = controller;
+        const origin = new THREE.Vector3();
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.gripped ? controller.gripped.quaternion : controller.quaternion);
+        controller.getWorldPosition(origin);
+        controller.getWorldQuaternion(tempQuat = new THREE.Quaternion());
+
+        // simpler approach: cast ray from controller forward
+        const worldPos = new THREE.Vector3();
+        const worldDir = new THREE.Vector3(0, 0, -1);
+        controller.getWorldPosition(worldPos);
+        controller.getWorldQuaternion(tempQuat = new THREE.Quaternion());
+        worldDir.applyQuaternion(tempQuat);
+
+        raycaster.set(worldPos, worldDir);
+        // find intersections with panel children (the cards)
+        const intersects = raycaster.intersectObjects(bpmnPanel.children, true);
+        if (intersects.length) {
+          const hit = intersects[0].object;
+          // find the node parent if needed
+          let node = hit;
+          while (node && node.parent !== bpmnPanel) node = node.parent;
+          if (node && node.userData && node.userData.label) {
+            highlightNode(node);
+          }
+        }
+      }
+    }
+  }
+
+  function highlightNode(node) {
+    // flash the node by scaling and changing opacity slightly
+    node.scale.set(1.07, 1.07, 1.07);
+    setTimeout(() => node.scale.set(1,1,1), 200);
+    console.log('Selected node:', node.userData.label);
+    // visual feedback: add small ring behind it
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.065, 0.075, 16).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.9 }));
+    ring.position.set(0,0,-0.01);
+    node.add(ring);
+    setTimeout(() => node.remove(ring), 600);
+  }
+
+  // animation loop
+  function animate() {
+    renderer.setAnimationLoop(render);
+  }
+
+  // utilities
+  let lastFrame = null;
+  async function render(timestamp, xrFrame) {
+    // XR frame handling: hit-test & reticle
+    const session = renderer.xr.getSession();
+    if (session && !hitTestSourceRequested) {
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      if (session.requestHitTestSource) {
+        session.requestHitTestSource({ space: viewerSpace }).then(source => {
+          hitTestSource = source;
+        });
+      }
+      // optional: request anchors support - many runtimes support XRAnchor on hit results via createAnchor()
+      session.addEventListener('end', () => {
+        hitTestSourceRequested = false;
+        hitTestSource = null;
+      });
+      hitTestSourceRequested = true;
+    }
+
+    if (hitTestSource && xrFrame) {
+      const referenceSpace = renderer.xr.getReferenceSpace();
+      const hitTestResults = xrFrame.getHitTestResults(hitTestSource);
+      if (hitTestResults.length > 0) {
+        const hit = hitTestResults[0];
+        const pose = hit.getPose(referenceSpace);
+        if (pose) {
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+        } else {
+          reticle.visible = false;
+        }
+      } else {
+        reticle.visible = false;
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+  </script>
+</body>
+</html>
