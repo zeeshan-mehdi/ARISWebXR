@@ -1,458 +1,599 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8" />
-  <title>WebXR BPMN MR POC (three.js)</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <link rel="stylesheet" href="./style.css" />
+	<title>three.js ve - handinput - point and drag</title>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+	<link type="text/css" rel="stylesheet" href="main.css">
 </head>
+
 <body>
-  <div id="info">
-    <div style="font-weight:700">WebXR BPMN MR — Quest 3 POC</div>
-    <div style="font-size:12px">Use controllers or hands to grab & move nodes/panel. Pinch or squeeze to grab.</div>
-  </div>
-  <button id="enter-ar-btn" style="position:fixed;top:16px;right:16px;z-index:10;padding:8px 16px;font-size:16px;border-radius:6px;background:#222;color:#fff;border:none;cursor:pointer;">Enter AR</button>
-
-  <script type="module">
-  const repoName ="ARISWebXR";
-
-
-  import * as THREE from './js/three.module.js';
-  import { ARButton } from './js/ARButton.js';
-  import { OrbitControls } from './js/OrbitControls.js';
-  import { createBPMNPanel, updateArrowPositions } from './js/BPMNPanel.js';
-
-
-  let camera, scene, renderer;
-  let controller, controller2;
-  let hand1, hand2; // Hand tracking
-  let reticle = null;
-  let hitTestSource = null;
-  let hitTestSourceRequested = false;
-  let anchorObjects = []; // keep anchors if created
-  let bpmnPanel = null;
-  let tempMatrix = new THREE.Matrix4();
-  let raycaster = new THREE.Raycaster();
-  const pointer = new THREE.Vector2();
-  // Dragging state for desktop drag support
-  // Drag/grab state for AR hand/controller interaction
-  let grabbedObject = null; // The object being grabbed (node or panel)
-  let grabbingController = null; // The hand or controller doing the grabbing
-  let grabOffset = new THREE.Vector3(); // Offset from hand/controller to object
-  let grabRotation = new THREE.Quaternion(); // For panel rotation (if needed)
-  let isPinching = false;
-
-  init();
-  animate();
-
-  // Always show ARButton when 'Enter AR' is clicked
-  const enterARBtn = document.getElementById('enter-ar-btn');
-  let arButton = null;
-  enterARBtn.addEventListener('click', () => {
-    if (arButton) {
-      arButton.style.display = '';
-      arButton.textContent = 'START AR Now';
-    } else {
-      arButton = ARButton.createButton(renderer, {
-        requiredFeatures: [ 'local-floor' ],
-        optionalFeatures: [ 'hand-tracking', 'dom-overlay', 'layers' ],
-        domOverlay: { root: document.body }
-      });
-      document.body.appendChild(arButton);
-    }
-  });
-
-  function init() {
-    // basic scene
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.01, 20);
-
-    // light
-    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-    scene.add(light);
-
-    // renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
-    document.body.appendChild(renderer.domElement);
-
-    // AR button - request immersive-ar with hand-tracking
-    document.body.appendChild(ARButton.createButton(renderer, {
-      requiredFeatures: [ 'local-floor' ],
-      optionalFeatures: [ 'hand-tracking', 'dom-overlay', 'layers' ],
-      domOverlay: { root: document.body }
-    }));
-
-    // Reticle for placement (hidden since panel is always visible)
-    const geometry = new THREE.RingGeometry(0.08, 0.10, 32).rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({ color: 0x00FF88, opacity: 0.9, transparent: true });
-    reticle = new THREE.Mesh(geometry, material);
-    reticle.matrixAutoUpdate = false;
-    reticle.visible = false; // Keep hidden
-    scene.add(reticle);
-
-  // controller for select (trigger/tap) and grab (squeeze/grip)
-  controller = renderer.xr.getController(0);
-  controller.addEventListener('select', onSelect);
-  controller.addEventListener('squeezestart', onSqueezeStart);
-  controller.addEventListener('squeezeend', onSqueezeEnd);
-  scene.add(controller);
-
-  // Add visible ray for controller 0
-  const rayGeom = new THREE.CylinderGeometry(0.003, 0.003, 1.2, 8);
-  const rayMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, opacity: 0.7, transparent: true });
-  const rayMesh = new THREE.Mesh(rayGeom, rayMat);
-  rayMesh.position.set(0, 0, -0.6);
-  rayMesh.rotation.x = Math.PI / 2;
-  controller.add(rayMesh);
-
-  // Second controller for two-handed manipulation
-  controller2 = renderer.xr.getController(1);
-  controller2.addEventListener('select', onSelect);
-  controller2.addEventListener('squeezestart', onSqueezeStart);
-  controller2.addEventListener('squeezeend', onSqueezeEnd);
-  scene.add(controller2);
-
-  // Add visible ray for controller 1
-  const rayMesh2 = new THREE.Mesh(rayGeom.clone(), rayMat.clone());
-  rayMesh2.position.set(0, 0, -0.6);
-  rayMesh2.rotation.x = Math.PI / 2;
-  controller2.add(rayMesh2);
-
-  // also show a simple cursor for pointer selection in AR
-  const cursorGeom = new THREE.SphereGeometry(0.01, 8, 8);
-  const cursorMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
-  const cursor = new THREE.Mesh(cursorGeom, cursorMat);
-  cursor.position.set(0, 0, -1.2);
-  controller.add(cursor);
-
-  const cursor2 = new THREE.Mesh(cursorGeom.clone(), cursorMat.clone());
-  cursor2.position.set(0, 0, -1.2);
-  controller2.add(cursor2);
-
-    // Hand tracking for direct hand interactions (Quest 3)
-    hand1 = renderer.xr.getHand(0);
-    hand1.addEventListener('pinchstart', onPinchStart);
-    hand1.addEventListener('pinchend', onPinchEnd);
-    scene.add(hand1);
-
-    // Add visible sphere to hand for debugging
-    const handMarker1 = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02),
-      new THREE.MeshBasicMaterial({ color: 0xff0000 })
-    );
-    hand1.add(handMarker1);
-
-    hand2 = renderer.xr.getHand(1);
-    hand2.addEventListener('pinchstart', onPinchStart);
-    hand2.addEventListener('pinchend', onPinchEnd);
-    scene.add(hand2);
-
-    // Add visible sphere to hand for debugging
-    const handMarker2 = new THREE.Mesh(
-      new THREE.SphereGeometry(0.02),
-      new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-    );
-    hand2.add(handMarker2);
-
-    console.log('Hand tracking initialized');
-
-    window.addEventListener('resize', onWindowResize);
-
-    // Optional: allow desktop testing with OrbitControls (non-XR)
-    const controls = new OrbitControls(camera, renderer.domElement);
-    camera.position.set(0,1.6,0);
-    controls.target.set(0,1.6,-1);
-    controls.update();
-
-    // Build BPMN panel and make it always visible
-  bpmnPanel = createBPMNPanel();
-  bpmnPanel.visible = true;
-  // For AR: place panel at table height (Y=0.8), in front of user (Z=-1.2), upright
-  bpmnPanel.position.set(0, 0.8, -1.2);
-  bpmnPanel.rotation.set(0, 0, 0); // upright
-  scene.add(bpmnPanel);
-}
-
-  function onWindowResize() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  }
-
-  // called when user taps/selects to interact with nodes
-  function onSelect(event) {
-    if (!bpmnPanel || !bpmnPanel.visible) return;
-
-    const controllerSource = event ? event.target : controller;
-
-    // Cast ray from controller forward
-    const worldPos = new THREE.Vector3();
-    const worldDir = new THREE.Vector3(0, 0, -1);
-    const tempQuat = new THREE.Quaternion();
-
-    controllerSource.getWorldPosition(worldPos);
-    controllerSource.getWorldQuaternion(tempQuat);
-    worldDir.applyQuaternion(tempQuat);
-
-    raycaster.set(worldPos, worldDir);
-
-    // Find intersections with panel children (the nodes)
-    const intersects = raycaster.intersectObjects(bpmnPanel.children, true);
-    if (intersects.length) {
-      const hit = intersects[0].object;
-      // Find the node parent if needed
-      let node = hit;
-      while (node && node.parent !== bpmnPanel) node = node.parent;
-      if (node && node.userData && node.userData.label) {
-        highlightNode(node);
-      }
-    }
-  }
-
-  function highlightNode(node) {
-    // flash the node by scaling and changing opacity slightly
-    node.scale.set(1.07, 1.07, 1.07);
-    setTimeout(() => node.scale.set(1,1,1), 200);
-    console.log('Selected node:', node.userData.label);
-    // visual feedback: add small ring behind it
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.065, 0.075, 16).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({ color: 0xffcc00, transparent: true, opacity: 0.9 }));
-    ring.position.set(0,0,-0.01);
-    node.add(ring);
-    setTimeout(() => node.remove(ring), 600);
-  }
-
-  // Pinch handlers for hand tracking (Quest 3 direct hand interaction)
-  function onPinchStart(event) {
-    console.log('Pinch started!', event);
-
-    if (!bpmnPanel || !bpmnPanel.visible) {
-      console.log('Panel not visible');
-      return;
-    }
-
-    const hand = event.target;
-    isPinching = true;
-
-    // Get hand position (pinch point)
-    const handPos = new THREE.Vector3();
-    hand.getWorldPosition(handPos);
-    console.log('Hand position:', handPos);
-
-    // Check what's near the hand (within grabbing distance)
-    const grabRadius = 0.3; // 30cm grab radius (increased for easier grabbing)
-
-    // Check each node
-    let closestNode = null;
-    let closestDist = grabRadius;
-
-    bpmnPanel.children.forEach(child => {
-      if (child.userData && child.userData.label) {
-        const nodeWorldPos = new THREE.Vector3();
-        child.getWorldPosition(nodeWorldPos);
-        const dist = handPos.distanceTo(nodeWorldPos);
-
-        if (dist < closestDist) {
-          closestNode = child;
-          closestDist = dist;
-        }
-      }
-    });
-
-    if (closestNode) {
-      // Grab the node
-      grabbedObject = closestNode;
-      grabbingController = hand;
-
-      const objectWorldPos = new THREE.Vector3();
-      closestNode.getWorldPosition(objectWorldPos);
-      grabOffset.subVectors(objectWorldPos, handPos);
-
-      // Visual feedback
-      closestNode.children.forEach(child => {
-        if (child.material && child.material.color) {
-          child.userData.originalColor = child.material.color.getHex();
-          child.material.color.lerp(new THREE.Color(0xffffff), 0.3);
-        }
-      });
-
-      console.log('Hand grabbed node:', closestNode.userData.label);
-    } else {
-      // Check if hand is over panel
-      const panelWorldPos = new THREE.Vector3();
-      bpmnPanel.getWorldPosition(panelWorldPos);
-      const distToPanel = handPos.distanceTo(panelWorldPos);
-
-      if (distToPanel < 1.0) { // 1m to grab whole panel (increased)
-        grabbedObject = bpmnPanel;
-        grabbingController = hand;
-        grabOffset.subVectors(panelWorldPos, handPos);
-        console.log('Hand grabbed entire panel at distance:', distToPanel);
-      } else {
-        console.log('Hand too far from panel:', distToPanel);
-      }
-    }
-  }
-
-  function onPinchEnd(event) {
-    if (grabbedObject && grabbingController === event.target) {
-      // Restore colors
-      grabbedObject.children.forEach(child => {
-        if (child.material && child.userData.originalColor !== undefined) {
-          child.material.color.setHex(child.userData.originalColor);
-        }
-      });
-
-      console.log('Hand released:', grabbedObject.userData ? grabbedObject.userData.label : 'BPMN panel');
-      grabbedObject = null;
-      grabbingController = null;
-      isPinching = false;
-    }
-  }
-
-  // Grab/Squeeze handlers for moving objects (controller-based)
-  function onSqueezeStart(event) {
-    console.log('Squeeze started!', event);
-
-    if (!bpmnPanel || !bpmnPanel.visible) {
-      console.log('Panel not visible');
-      return;
-    }
-
-    const controllerSource = event.target;
-
-    // Raycast from controller to find what we're grabbing
-    const worldPos = new THREE.Vector3();
-    const worldDir = new THREE.Vector3(0, 0, -1);
-    const tempQuat = new THREE.Quaternion();
-
-    controllerSource.getWorldPosition(worldPos);
-    controllerSource.getWorldQuaternion(tempQuat);
-    worldDir.applyQuaternion(tempQuat);
-
-    raycaster.set(worldPos, worldDir);
-
-    // First check if we're grabbing individual nodes
-    const nodeIntersects = raycaster.intersectObjects(bpmnPanel.children, true);
-
-    if (nodeIntersects.length > 0) {
-      // Find the node parent (task/event)
-      let node = nodeIntersects[0].object;
-      while (node && node.parent !== bpmnPanel) node = node.parent;
-
-      if (node && node.userData && node.userData.label) {
-        // Grab individual node
-        grabbedObject = node;
-        grabbingController = controllerSource;
-
-        // Calculate offset from controller to object
-        const objectWorldPos = new THREE.Vector3();
-        node.getWorldPosition(objectWorldPos);
-        grabOffset.subVectors(objectWorldPos, worldPos);
-
-        // Visual feedback - brighten the grabbed object
-        if (node.material) {
-          node.userData.originalEmissive = node.material.emissive ? node.material.emissive.getHex() : 0x000000;
-          node.material.emissive = new THREE.Color(0x44ff44);
-        }
-        node.children.forEach(child => {
-          if (child.material && child.material.color) {
-            child.userData.originalColor = child.material.color.getHex();
-            child.material.color.lerp(new THREE.Color(0xffffff), 0.3);
-          }
-        });
-
-        console.log('Grabbed node:', node.userData.label);
-        return;
-      }
-    }
-
-    // If we didn't grab a node, check if we're grabbing the panel itself
-    const panelIntersects = raycaster.intersectObject(bpmnPanel, true);
-    if (panelIntersects.length > 0) {
-      // Grab entire panel
-      grabbedObject = bpmnPanel;
-      grabbingController = controllerSource;
-
-      const panelWorldPos = new THREE.Vector3();
-      bpmnPanel.getWorldPosition(panelWorldPos);
-      grabOffset.subVectors(panelWorldPos, worldPos);
-
-      bpmnPanel.getWorldQuaternion(grabRotation);
-
-      console.log('Grabbed entire BPMN panel');
-    }
-  }
-
-  function onSqueezeEnd(event) {
-    if (grabbedObject && grabbingController === event.target) {
-      // Restore original colors
-      if (grabbedObject.material && grabbedObject.userData.originalEmissive !== undefined) {
-        grabbedObject.material.emissive = new THREE.Color(grabbedObject.userData.originalEmissive);
-      }
-      grabbedObject.children.forEach(child => {
-        if (child.material && child.userData.originalColor !== undefined) {
-          child.material.color.setHex(child.userData.originalColor);
-        }
-      });
-
-      console.log('Released:', grabbedObject.userData ? grabbedObject.userData.label : 'BPMN panel');
-      grabbedObject = null;
-      grabbingController = null;
-    }
-  }
-
-  // Update grabbed object position during animation loop
-  function updateGrabbedObject() {
-    if (grabbedObject && grabbingController) {
-      const controllerWorldPos = new THREE.Vector3();
-      const controllerWorldQuat = new THREE.Quaternion();
-
-      grabbingController.getWorldPosition(controllerWorldPos);
-      grabbingController.getWorldQuaternion(controllerWorldQuat);
-
-      // Calculate new position with offset
-      const newPos = new THREE.Vector3().copy(controllerWorldPos).add(
-        grabOffset.clone().applyQuaternion(controllerWorldQuat)
-      );
-
-      if (grabbedObject === bpmnPanel) {
-        // Move entire panel
-        bpmnPanel.position.copy(newPos);
-      } else {
-        // Move individual node (relative to panel)
-        const panelWorldMatrix = new THREE.Matrix4();
-        bpmnPanel.matrixWorld.decompose(
-          new THREE.Vector3(),
-          new THREE.Quaternion(),
-          new THREE.Vector3()
-        );
-
-        // Convert world position to panel-local position
-        const panelInverseMatrix = new THREE.Matrix4().copy(bpmnPanel.matrixWorld).invert();
-        const localPos = newPos.clone().applyMatrix4(panelInverseMatrix);
-
-        grabbedObject.position.copy(localPos);
-      }
-    }
-  }
-
-  // animation loop
-  function animate() {
-    renderer.setAnimationLoop(render);
-  }
-
-
-  // utilities
-  let lastFrame = null;
-  async function render(timestamp, xrFrame) {
-    // No need for hit-test since panel is always visible
-    // Just keep reticle hidden
-    reticle.visible = false;
-
-    // Update grabbed object position
-    updateGrabbedObject();
-    renderer.render(scene, camera);
-}
+
+	<div id="info">
+		<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> vr - handinput - point and drag<br />
+	</div>
+
+	<script type="importmap">
+		{
+			"imports": {
+				"three": "../build/three.module.js",
+				"three/addons/": "./jsm/"
+			}
+		}
+	</script>
+
+	<script type="module">
+
+		import * as THREE from 'three';
+		import { VRButton } from 'three/addons/webxr/VRButton.js';
+		import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+		import { OculusHandModel } from 'three/addons/webxr/OculusHandModel.js';
+		import { OculusHandPointerModel } from 'three/addons/webxr/OculusHandPointerModel.js';
+		import { createText } from 'three/addons/webxr/Text2D.js';
+
+		import { World, System, Component, TagComponent, Types } from 'three/addons/libs/ecsy.module.js';
+
+		class Object3D extends Component { }
+
+		Object3D.schema = {
+			object: { type: Types.Ref }
+		};
+
+		class Button extends Component { }
+
+		Button.schema = {
+			// button states: [none, hovered, pressed]
+			currState: { type: Types.String, default: 'none' },
+			prevState: { type: Types.String, default: 'none' },
+			action: { type: Types.Ref, default: () => { } }
+		};
+
+		class ButtonSystem extends System {
+
+			execute( /*delta, time*/ ) {
+
+				this.queries.buttons.results.forEach( entity => {
+
+					const button = entity.getMutableComponent( Button );
+					const buttonMesh = entity.getComponent( Object3D ).object;
+					if ( button.currState == 'none' ) {
+
+						buttonMesh.scale.set( 1, 1, 1 );
+
+					} else {
+
+						buttonMesh.scale.set( 1.1, 1.1, 1.1 );
+
+					}
+
+					if ( button.currState == 'pressed' && button.prevState != 'pressed' ) {
+
+						button.action();
+
+					}
+
+					// preserve prevState, clear currState
+					// HandRaySystem will update currState
+					button.prevState = button.currState;
+					button.currState = 'none';
+
+				} );
+
+			}
+
+		}
+
+		ButtonSystem.queries = {
+			buttons: {
+				components: [ Button ]
+			}
+		};
+
+		class Draggable extends Component { }
+
+		Draggable.schema = {
+			// draggable states: [detached, hovered, to-be-attached, attached, to-be-detached]
+			state: { type: Types.String, default: 'none' },
+			originalParent: { type: Types.Ref, default: null },
+			attachedPointer: { type: Types.Ref, default: null }
+		};
+
+		class DraggableSystem extends System {
+
+			execute( /*delta, time*/ ) {
+
+				this.queries.draggable.results.forEach( entity => {
+
+					const draggable = entity.getMutableComponent( Draggable );
+					const object = entity.getComponent( Object3D ).object;
+					if ( draggable.originalParent == null ) {
+
+						draggable.originalParent = object.parent;
+
+					}
+
+					switch ( draggable.state ) {
+
+						case 'to-be-attached':
+							draggable.attachedPointer.children[ 0 ].attach( object );
+							draggable.state = 'attached';
+							break;
+						case 'to-be-detached':
+							draggable.originalParent.attach( object );
+							draggable.state = 'detached';
+							break;
+						default:
+							object.scale.set( 1, 1, 1 );
+
+					}
+
+				} );
+
+			}
+
+		}
+
+		DraggableSystem.queries = {
+			draggable: {
+				components: [ Draggable ]
+			}
+		};
+
+		class Intersectable extends TagComponent { }
+
+		class HandRaySystem extends System {
+
+			init( attributes ) {
+
+				this.handPointers = attributes.handPointers;
+
+			}
+
+			execute( /*delta, time*/ ) {
+
+				this.handPointers.forEach( hp => {
+
+					let distance = null;
+					let intersectingEntity = null;
+					this.queries.intersectable.results.forEach( entity => {
+
+						const object = entity.getComponent( Object3D ).object;
+						const intersections = hp.intersectObject( object, false );
+						if ( intersections && intersections.length > 0 ) {
+
+							if ( distance == null || intersections[ 0 ].distance < distance ) {
+
+								distance = intersections[ 0 ].distance;
+								intersectingEntity = entity;
+
+							}
+
+						}
+
+					} );
+					if ( distance ) {
+
+						hp.setCursor( distance );
+						if ( intersectingEntity.hasComponent( Button ) ) {
+
+							const button = intersectingEntity.getMutableComponent( Button );
+							if ( hp.isPinched() ) {
+
+								button.currState = 'pressed';
+
+							} else if ( button.currState != 'pressed' ) {
+
+								button.currState = 'hovered';
+
+							}
+
+						}
+
+						if ( intersectingEntity.hasComponent( Draggable ) ) {
+
+							const draggable = intersectingEntity.getMutableComponent( Draggable );
+							const object = intersectingEntity.getComponent( Object3D ).object;
+							object.scale.set( 1.1, 1.1, 1.1 );
+							if ( hp.isPinched() ) {
+
+								if ( ! hp.isAttached() && draggable.state != 'attached' ) {
+
+									draggable.state = 'to-be-attached';
+									draggable.attachedPointer = hp;
+									hp.setAttached( true );
+
+								}
+
+							} else {
+
+								if ( hp.isAttached() && draggable.state == 'attached' ) {
+
+									console.log( 'hello' );
+									draggable.state = 'to-be-detached';
+									draggable.attachedPointer = null;
+									hp.setAttached( false );
+
+								}
+
+							}
+
+						}
+
+					} else {
+
+						hp.setCursor( 1.5 );
+
+					}
+
+				} );
+
+			}
+
+		}
+
+		HandRaySystem.queries = {
+			intersectable: {
+				components: [ Intersectable ]
+			}
+		};
+
+		class HandsInstructionText extends TagComponent { }
+
+		class InstructionSystem extends System {
+
+			init( attributes ) {
+
+				this.controllers = attributes.controllers;
+
+			}
+
+			execute( /*delta, time*/ ) {
+
+				let visible = false;
+				this.controllers.forEach( controller => {
+
+					if ( controller.visible ) {
+
+						visible = true;
+
+					}
+
+				} );
+
+				this.queries.instructionTexts.results.forEach( entity => {
+
+					const object = entity.getComponent( Object3D ).object;
+					object.visible = visible;
+
+				} );
+
+			}
+
+		}
+
+		InstructionSystem.queries = {
+			instructionTexts: {
+				components: [ HandsInstructionText ]
+			}
+		};
+
+		class OffsetFromCamera extends Component { }
+
+		OffsetFromCamera.schema = {
+			x: { type: Types.Number, default: 0 },
+			y: { type: Types.Number, default: 0 },
+			z: { type: Types.Number, default: 0 },
+		};
+
+		class NeedCalibration extends TagComponent { }
+
+		class CalibrationSystem extends System {
+
+			init( attributes ) {
+
+				this.camera = attributes.camera;
+				this.renderer = attributes.renderer;
+
+	}
+
+			execute( /*delta, time*/ ) {
+
+				this.queries.needCalibration.results.forEach( entity => {
+
+					if ( this.renderer.xr.getSession() ) {
+
+						const offset = entity.getComponent( OffsetFromCamera );
+						const object = entity.getComponent( Object3D ).object;
+						const xrCamera = this.renderer.xr.getCamera();
+						object.position.x = xrCamera.position.x + offset.x;
+						object.position.y = xrCamera.position.y + offset.y;
+						object.position.z = xrCamera.position.z + offset.z;
+						entity.removeComponent( NeedCalibration );
+
+					}
+
+				} );
+
+			}
+
+		}
+
+		CalibrationSystem.queries = {
+			needCalibration: {
+				components: [ NeedCalibration ]
+			}
+		};
+
+		class Randomizable extends TagComponent { }
+
+		class RandomizerSystem extends System {
+
+			init( /*attributes*/ ) {
+
+				this.needRandomizing = true;
+
+			}
+
+			execute( /*delta, time*/ ) {
+
+				if ( ! this.needRandomizing ) {
+
+					return;
+
+				}
+
+				this.queries.randomizable.results.forEach( entity => {
+
+					const object = entity.getComponent( Object3D ).object;
+
+					object.material.color.setHex( Math.random() * 0xffffff );
+
+					object.position.x = Math.random() * 2 - 1;
+					object.position.y = Math.random() * 2;
+					object.position.z = Math.random() * 2 - 1;
+
+					object.rotation.x = Math.random() * 2 * Math.PI;
+					object.rotation.y = Math.random() * 2 * Math.PI;
+					object.rotation.z = Math.random() * 2 * Math.PI;
+
+					object.scale.x = Math.random() + 0.5;
+					object.scale.y = Math.random() + 0.5;
+					object.scale.z = Math.random() + 0.5;
+					this.needRandomizing = false;
+
+				} );
+
+			}
+
+		}
+
+		RandomizerSystem.queries = {
+			randomizable: {
+				components: [ Randomizable ]
+			}
+		};
+
+		const world = new World();
+		const clock = new THREE.Clock();
+		let camera, scene, renderer;
+
+		init();
+
+		function makeButtonMesh( x, y, z, color ) {
+
+			const geometry = new THREE.BoxGeometry( x, y, z );
+			const material = new THREE.MeshPhongMaterial( { color: color } );
+			const buttonMesh = new THREE.Mesh( geometry, material );
+			return buttonMesh;
+
+		}
+
+		function init() {
+
+			const container = document.createElement( 'div' );
+			document.body.appendChild( container );
+
+			scene = new THREE.Scene();
+			scene.background = new THREE.Color( 0x444444 );
+
+			camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 10 );
+			camera.position.set( 0, 1.2, 0.3 );
+
+			scene.add( new THREE.HemisphereLight( 0xcccccc, 0x999999, 3 ) );
+
+			const light = new THREE.DirectionalLight( 0xffffff, 3 );
+			light.position.set( 0, 6, 0 );
+			light.castShadow = true;
+			light.shadow.camera.top = 2;
+			light.shadow.camera.bottom = - 2;
+			light.shadow.camera.right = 2;
+			light.shadow.camera.left = - 2;
+			light.shadow.mapSize.set( 4096, 4096 );
+			scene.add( light );
+
+			renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.setAnimationLoop( animate );
+			renderer.shadowMap.enabled = true;
+			renderer.xr.enabled = true;
+			renderer.xr.cameraAutoUpdate = false;
+
+			container.appendChild( renderer.domElement );
+
+			const sessionInit = {
+				requiredFeatures: [ 'hand-tracking' ]
+			};
+
+			document.body.appendChild( VRButton.createButton( renderer, sessionInit ) );
+
+			// controllers
+			const controller1 = renderer.xr.getController( 0 );
+			scene.add( controller1 );
+
+			const controller2 = renderer.xr.getController( 1 );
+			scene.add( controller2 );
+
+			const controllerModelFactory = new XRControllerModelFactory();
+
+			// Hand 1
+			const controllerGrip1 = renderer.xr.getControllerGrip( 0 );
+			controllerGrip1.add( controllerModelFactory.createControllerModel( controllerGrip1 ) );
+			scene.add( controllerGrip1 );
+
+			const hand1 = renderer.xr.getHand( 0 );
+			hand1.add( new OculusHandModel( hand1 ) );
+			const handPointer1 = new OculusHandPointerModel( hand1, controller1 );
+			hand1.add( handPointer1 );
+
+			scene.add( hand1 );
+
+			// Hand 2
+			const controllerGrip2 = renderer.xr.getControllerGrip( 1 );
+			controllerGrip2.add( controllerModelFactory.createControllerModel( controllerGrip2 ) );
+			scene.add( controllerGrip2 );
+
+			const hand2 = renderer.xr.getHand( 1 );
+			hand2.add( new OculusHandModel( hand2 ) );
+			const handPointer2 = new OculusHandPointerModel( hand2, controller2 );
+			hand2.add( handPointer2 );
+			scene.add( hand2 );
+
+
+			// setup objects in scene and entities
+			const floorGeometry = new THREE.PlaneGeometry( 4, 4 );
+			const floorMaterial = new THREE.MeshPhongMaterial( { color: 0x222222 } );
+			const floor = new THREE.Mesh( floorGeometry, floorMaterial );
+			floor.rotation.x = - Math.PI / 2;
+			floor.receiveShadow = true;
+			scene.add( floor );
+
+			const menuGeometry = new THREE.PlaneGeometry( 0.24, 0.5 );
+			const menuMaterial = new THREE.MeshPhongMaterial( {
+				opacity: 0,
+				transparent: true,
+			} );
+			const menuMesh = new THREE.Mesh( menuGeometry, menuMaterial );
+			menuMesh.position.set( 0.4, 1, - 1 );
+			menuMesh.rotation.y = - Math.PI / 12;
+			scene.add( menuMesh );
+
+			const resetButton = makeButtonMesh( 0.2, 0.1, 0.01, 0x355c7d );
+			const resetButtonText = createText( 'reset', 0.06 );
+			resetButton.add( resetButtonText );
+			resetButtonText.position.set( 0, 0, 0.0051 );
+			resetButton.position.set( 0, - 0.06, 0 );
+			menuMesh.add( resetButton );
+
+			const exitButton = makeButtonMesh( 0.2, 0.1, 0.01, 0xff0000 );
+			const exitButtonText = createText( 'exit', 0.06 );
+			exitButton.add( exitButtonText );
+			exitButtonText.position.set( 0, 0, 0.0051 );
+			exitButton.position.set( 0, - 0.18, 0 );
+			menuMesh.add( exitButton );
+
+			const instructionText = createText( 'This is a WebXR Hands demo, please explore with hands.', 0.04 );
+			instructionText.position.set( 0, 1.6, - 0.6 );
+			scene.add( instructionText );
+
+			const exitText = createText( 'Exiting session...', 0.04 );
+			exitText.position.set( 0, 1.5, - 0.6 );
+			exitText.visible = false;
+			scene.add( exitText );
+
+			world
+				.registerComponent( Object3D )
+				.registerComponent( Button )
+				.registerComponent( Intersectable )
+				.registerComponent( HandsInstructionText )
+				.registerComponent( OffsetFromCamera )
+				.registerComponent( NeedCalibration )
+				.registerComponent( Randomizable )
+				.registerComponent( Draggable );
+
+			world
+				.registerSystem( RandomizerSystem )
+				.registerSystem( InstructionSystem, { controllers: [ controllerGrip1, controllerGrip2 ] } )
+				.registerSystem( CalibrationSystem, { renderer: renderer, camera: camera } )
+				.registerSystem( ButtonSystem )
+				.registerSystem( DraggableSystem )
+				.registerSystem( HandRaySystem, { handPointers: [ handPointer1, handPointer2 ] } );
+
+			for ( let i = 0; i < 20; i ++ ) {
+
+				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
+				scene.add( object );
+
+				const entity = world.createEntity();
+				entity.addComponent( Intersectable );
+				entity.addComponent( Randomizable );
+				entity.addComponent( Object3D, { object: object } );
+				entity.addComponent( Draggable );
+
+			}
+
+			const menuEntity = world.createEntity();
+			menuEntity.addComponent( Intersectable );
+			menuEntity.addComponent( OffsetFromCamera, { x: 0.4, y: 0, z: - 1 } );
+			menuEntity.addComponent( NeedCalibration );
+			menuEntity.addComponent( Object3D, { object: menuMesh } );
+
+			const rbEntity = world.createEntity();
+			rbEntity.addComponent( Intersectable );
+			rbEntity.addComponent( Object3D, { object: resetButton } );
+			const rbAction = function () {
+
+				world.getSystem( RandomizerSystem ).needRandomizing = true;
+
+			};
+
+			rbEntity.addComponent( Button, { action: rbAction } );
+
+			const ebEntity = world.createEntity();
+			ebEntity.addComponent( Intersectable );
+			ebEntity.addComponent( Object3D, { object: exitButton } );
+			const ebAction = function () {
+
+				exitText.visible = true;
+				setTimeout( function () {
+
+					exitText.visible = false; renderer.xr.getSession().end();
+
+				}, 2000 );
+
+			};
+
+			ebEntity.addComponent( Button, { action: ebAction } );
+
+			const itEntity = world.createEntity();
+			itEntity.addComponent( HandsInstructionText );
+			itEntity.addComponent( Object3D, { object: instructionText } );
+
+			window.addEventListener( 'resize', onWindowResize );
+
+		}
+
+		function onWindowResize() {
+
+			camera.aspect = window.innerWidth / window.innerHeight;
+			camera.updateProjectionMatrix();
+
+			renderer.setSize( window.innerWidth, window.innerHeight );
+
+		}
+
+		function animate() {
+
+			const delta = clock.getDelta();
+			const elapsedTime = clock.elapsedTime;
+			renderer.xr.updateCamera( camera );
+			world.execute( delta, elapsedTime );
+			renderer.render( scene, camera );
+
+		}
+
+	</script>
+</body>
+
+</html>
