@@ -67,7 +67,7 @@ export function createBPMNPanel() {
   });
 
   // small instruction text
-  const instrTex = textTexture('Pinch to grab & move', 520, 48, 16, 'center');
+  const instrTex = textTexture('Pinch or squeeze to grab nodes', 520, 48, 16, 'center');
   const instrMat = new THREE.MeshBasicMaterial({ map: instrTex, transparent: true });
   const instrQuad = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.08), instrMat);
   instrQuad.position.set(0, -0.28, 0.001);
