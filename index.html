@@ -529,38 +529,54 @@
 			const graphGroup = new THREE.Group();
 			scene.add(graphGroup);
 
-			// Store node references for edge creation
-			const nodeObjects = [];
-			const N = 20;
-			const lineSpacing = 0.22;
-			const lineY = 1.4;
-			const lineZ = -1.5; // Place graph 1.5m in front of user (relative to XR rig)
-			for (let i = 0; i < N; i++) {
-				const x = (i - (N-1)/2) * lineSpacing;
-				const y = lineY;
-				const z = lineZ;
-				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
-				object.position.set(x, y, z);
-				// Add a text label to the box
-				const label = createText( `Box ${i+1}`, 0.04 );
-				label.position.set( 0, 0, 0.09 );
-				object.add( label );
-				graphGroup.add( object );
-				nodeObjects.push(object);
-				const entity = world.createEntity();
-				entity.addComponent( Intersectable );
-				entity.addComponent( Randomizable );
-				entity.addComponent( Object3D, { object: object } );
-				entity.addComponent( Draggable );
-			}
+						// --- GRID CONFIG ---
+						const N = 20;
+						const cols = 5; // how many columns across
+						const rows = Math.ceil(N / cols);
+						const hSpacing = 0.25; // horizontal spacing (meters)
+						const vSpacing = 0.22; // vertical spacing (meters)
+						const wallZ = -1.5;    // distance in front of user, relative to rig when attached
+						const wallCenterY = 0.0; // center of wall relative to rig
+
+						const nodeObjects = [];
+						const labelObjects = [];
+
+						for (let i = 0; i < N; i++) {
+							const col = i % cols;
+							const row = Math.floor(i / cols);
+
+							// compute centered coordinates in plane
+							const x = (col - (cols - 1) / 2) * hSpacing;
+							const y = (rows - 1) / 2 * vSpacing - row * vSpacing + wallCenterY;
+							const z = 0; // local plane; graphGroup moves the whole wall forward
+
+							const object = new THREE.Mesh(
+								new THREE.BoxGeometry(0.15, 0.15, 0.02), // thin panel
+								new THREE.MeshLambertMaterial({ color: 0xffffff })
+							);
+							object.position.set(x, y, z);
+							// small face offset so labels draw in front
+							const label = createText(`Box ${i + 1}`, 0.045);
+							label.position.set(0, 0, 0.03);
+							object.add(label);
+
+							graphGroup.add(object);
+							nodeObjects.push(object);
+							labelObjects.push(label);
+
+							const entity = world.createEntity();
+							entity.addComponent(Intersectable);
+							entity.addComponent(Object3D, { object: object });
+							entity.addComponent(Draggable);
+						}
 
 			// Create undirected edges (chain: Box 1—Box 2—...—Box 20)
 			const edgeObjects = [];
 			for (let i = 0; i < nodeObjects.length - 1; i++) {
 				const from = nodeObjects[i];
 				const to = nodeObjects[i+1];
-				// Cylinder for edge
-				const edgeGeom = new THREE.CylinderGeometry(0.025, 0.025, 1, 12);
+				// Thinner cylinder for edge (Y axis)
+				const edgeGeom = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
 				const edgeMat = new THREE.MeshPhongMaterial({ color: 0xffc107, opacity: 0.85, transparent: true });
 				const edge = new THREE.Mesh(edgeGeom, edgeMat);
 				// Drop shadow (like arrows)
@@ -596,6 +612,14 @@
 			});
 
 			// Update edges every frame to follow nodes
+			// Pre-define reusable vectors
+			const fromPos = new THREE.Vector3();
+			const toPos = new THREE.Vector3();
+			const mid = new THREE.Vector3();
+			const dir = new THREE.Vector3();
+			const up = new THREE.Vector3(0, 1, 0);
+			const camWorldPos = new THREE.Vector3();
+
 			renderer.setAnimationLoop(function animate() {
 				// Update ECS world and render as before
 				const delta = clock.getDelta();
@@ -603,29 +627,40 @@
 				renderer.xr.updateCamera( camera );
 				world.execute( delta, elapsedTime );
 
-				// Update edge positions
+				// Update edge positions (use local positions)
 				edgeObjects.forEach(edge => {
 					const from = edge.userData.from;
 					const to = edge.userData.to;
-					from.updateMatrixWorld();
-					to.updateMatrixWorld();
-					const fromPos = new THREE.Vector3();
-					const toPos = new THREE.Vector3();
-					from.getWorldPosition(fromPos);
-					to.getWorldPosition(toPos);
-					const mid = fromPos.clone().lerp(toPos, 0.5);
+
+					fromPos.copy(from.position);
+					toPos.copy(to.position);
+
+					dir.subVectors(toPos, fromPos);
+					const length = dir.length();
+
+					// position at midpoint
+					mid.copy(fromPos).add(toPos).multiplyScalar(0.5);
 					edge.position.copy(mid);
-					const diff = toPos.clone().sub(fromPos);
-					edge.scale.set(1, diff.length() / 1, 1);
-					edge.lookAt(toPos);
-					edge.rotateX(Math.PI / 2);
+
+					// set cylinder length (assuming original geometry height was 1)
+					edge.scale.set(1, length, 1);
+
+					// align cylinder 'up' (0,1,0) with dir
+					edge.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+				});
+
+				// Make labels face the camera (headset)
+				renderer.xr.getCamera().getWorldPosition(camWorldPos);
+				labelObjects.forEach(label => {
+					label.lookAt(camWorldPos);
 				});
 
 				// Remove manual camera positioning in XR; let XR rig handle camera
 				// Only update camera in non-XR mode
 				if (!renderer.xr.isPresenting) {
-					camera.position.set(0, lineY, 0.3);
-					camera.lookAt(0, lineY, lineZ);
+					// Center camera on wall
+					camera.position.set(0, 0, 0.3);
+					camera.lookAt(0, 0, -1.5);
 				}
 				renderer.render( scene, camera );
 			});
