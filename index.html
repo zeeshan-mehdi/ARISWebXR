@@ -153,13 +153,13 @@
     controls.target.set(0,1.6,-1);
     controls.update();
 
-  // Build BPMN panel and make it always visible
+    // Build BPMN panel and make it always visible
     bpmnPanel = createBPMNPanel();
     bpmnPanel.visible = true;
-    // Rotate panel to lie flat on table (rotate 90 degrees around X axis)
-    bpmnPanel.rotation.x = -Math.PI / 2;
-    // Position it in front of user at table height
-    bpmnPanel.position.set(0, 0.8, -0.8);
+    // Position panel upright at eye level, directly in front of camera
+    bpmnPanel.position.set(0, 1.2, -1.2);
+    bpmnPanel.rotation.set(0, 0, 0); // upright
+    bpmnPanel.lookAt(camera.position.x, camera.position.y, camera.position.z);
     scene.add(bpmnPanel);
 }
 
