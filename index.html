@@ -672,6 +672,15 @@
 						}
 					}
 
+					// Failsafe: if stuck in 'attached' but pointer is not attached, force detach
+					if (draggable.state === 'attached' && (
+						draggable.attachedPointer == null ||
+						!draggable.attachedPointer.isAttached ||
+						(draggable.attachedPointer.isAttached && !draggable.attachedPointer.isAttached())
+					)) {
+						draggable.state = 'to-be-detached';
+					}
+
 					switch (draggable.state) {
 						case 'to-be-attached':
 							draggable.attachedPointer.children[0].attach(object);
