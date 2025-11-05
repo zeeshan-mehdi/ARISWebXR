@@ -639,7 +639,7 @@
 			handleEntity.addComponent(Object3D, { object: handleMesh });
 			handleEntity.addComponent(Draggable);
 
-			// Patch DraggableSystem to move group if handle is dragged, and add visual feedback
+			// Patch DraggableSystem to unify drag/release for handle and nodes
 			const origDraggableSystemExecute = DraggableSystem.prototype.execute;
 			DraggableSystem.prototype.execute = function() {
 				this.queries.draggable.results.forEach(entity => {
@@ -648,7 +648,8 @@
 					if (draggable.originalParent == null) {
 						draggable.originalParent = object.parent;
 					}
-					// Visual feedback for handle (flat bar)
+
+					// Unified visual feedback for all draggables
 					if (object === handleMesh) {
 						if (draggable.state === 'attached' || draggable.state === 'to-be-attached') {
 							object.scale.set(1.15, 1.15, 1.15);
@@ -660,7 +661,17 @@
 							object.scale.set(1, 1, 1);
 							object.material.opacity = 0.85;
 						}
+					} else {
+						// For nodes, just scale
+						if (draggable.state === 'attached' || draggable.state === 'to-be-attached') {
+							object.scale.set(1.15, 1.15, 1.15);
+						} else if (draggable.state === 'hovered') {
+							object.scale.set(1.08, 1.08, 1.08);
+						} else {
+							object.scale.set(1, 1, 1);
+						}
 					}
+
 					switch (draggable.state) {
 						case 'to-be-attached':
 							draggable.attachedPointer.children[0].attach(object);
@@ -677,9 +688,11 @@
 							if (object === handleMesh) {
 								draggable.originalParent.attach(graphGroup);
 							}
+							// Always clear attachedPointer for both
+							draggable.attachedPointer = null;
 							break;
 						default:
-							if (object !== handleMesh) object.scale.set(1, 1, 1);
+							// No-op, handled above
 					}
 				});
 			};
