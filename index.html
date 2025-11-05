@@ -462,13 +462,7 @@
 
 
 			// setup objects in scene and entities
-			const floorGeometry = new THREE.PlaneGeometry( 4, 4 );
-			const floorMaterial = new THREE.MeshPhongMaterial( { color: 0x222222 } );
-			const floor = new THREE.Mesh( floorGeometry, floorMaterial );
-			floor.rotation.x = - Math.PI / 2;
-			floor.position.y = -0.05; // slightly below zero to avoid intersection
-			floor.receiveShadow = true;
-			scene.add( floor );
+		// Floor mesh removed for floating BPMN diagram in VR/AR
 
 			const menuGeometry = new THREE.PlaneGeometry( 0.24, 0.5 );
 			const menuMaterial = new THREE.MeshPhongMaterial( {
@@ -636,7 +630,7 @@
 				const rig = xrCamera.parent;
 				if (rig && graphGroup.parent !== rig) {
 					rig.add(graphGroup);
-					graphGroup.position.set(0, 1.4, -1.5); // float at head height in front
+					graphGroup.position.set(0, 1.4, -2.2); // farther away, float at head height
 					graphGroup.rotation.set(0, 0, 0);
 				}
 			});
