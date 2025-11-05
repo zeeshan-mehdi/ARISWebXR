@@ -8,86 +8,68 @@
 	<link type="text/css" rel="stylesheet" href="main.css">
 </head>
 
-<body>
+		execute( /*delta, time*/ ) {
+			// --- Global drag-release tracking and failsafe ---
+			this.handPointers.forEach(hp => {
+				// Failsafe: if pointer is not pinched but still attached to a draggable, force release
+				if (!hp.isPinched() && hp._attachedDraggable && hp._attachedDraggable.state === 'attached') {
+					hp._attachedDraggable.state = 'to-be-detached';
+					hp._attachedDraggable.attachedPointer = null;
+					hp.setAttached(false);
+					hp._attachedDraggable = null;
+				}
+			});
 
-	<div id="info">
-		<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> vr - handinput - point and drag<br />
-	</div>
-
-	<script type="importmap">
-		{
-			"imports": {
-				"three": "./libs/three.module.js",
-				"three/addons/": "./jsm/"
-			}
-		}
-	</script>
-
-	<script type="module">
-
-		import * as THREE from 'three';
-		import { VRButton } from 'three/addons/webxr/VRButton.js';
-		import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
-		import { OculusHandModel } from 'three/addons/webxr/OculusHandModel.js';
-		import { OculusHandPointerModel } from 'three/addons/webxr/OculusHandPointerModel.js';
-		import { createText } from 'three/addons/webxr/Text2D.js';
-
-		import { World, System, Component, TagComponent, Types } from 'three/addons/libs/ecsy.module.js';
-
-		class Object3D extends Component { }
-
-		Object3D.schema = {
-			object: { type: Types.Ref }
-		};
-
-		class Button extends Component { }
-
-		Button.schema = {
-			// button states: [none, hovered, pressed]
-			currState: { type: Types.String, default: 'none' },
-			prevState: { type: Types.String, default: 'none' },
-			action: { type: Types.Ref, default: () => { } }
-		};
-
-		class ButtonSystem extends System {
-
-			execute( /*delta, time*/ ) {
-
-				this.queries.buttons.results.forEach( entity => {
-
-					const button = entity.getMutableComponent( Button );
-					const buttonMesh = entity.getComponent( Object3D ).object;
-					if ( button.currState == 'none' ) {
-
-						buttonMesh.scale.set( 1, 1, 1 );
-
-					} else {
-
-						buttonMesh.scale.set( 1.1, 1.1, 1.1 );
-
+			this.handPointers.forEach( hp => {
+				let distance = null;
+				let intersectingEntity = null;
+				this.queries.intersectable.results.forEach( entity => {
+					const object = entity.getComponent( Object3D ).object;
+					const intersections = hp.intersectObject( object, false );
+					if ( intersections && intersections.length > 0 ) {
+						if ( distance == null || intersections[ 0 ].distance < distance ) {
+							distance = intersections[ 0 ].distance;
+							intersectingEntity = entity;
+						}
 					}
-
-					if ( button.currState == 'pressed' && button.prevState != 'pressed' ) {
-
-						button.action();
-
-					}
-
-					// preserve prevState, clear currState
-					// HandRaySystem will update currState
-					button.prevState = button.currState;
-					button.currState = 'none';
-
 				} );
-
-			}
-
+				if ( distance ) {
+					hp.setCursor( distance );
+					if ( intersectingEntity.hasComponent( Button ) ) {
+						const button = intersectingEntity.getMutableComponent( Button );
+						if ( hp.isPinched() ) {
+							button.currState = 'pressed';
+						} else if ( button.currState != 'pressed' ) {
+							button.currState = 'hovered';
+						}
+					}
+					if ( intersectingEntity.hasComponent( Draggable ) ) {
+						const draggable = intersectingEntity.getMutableComponent( Draggable );
+						const object = intersectingEntity.getComponent( Object3D ).object;
+						object.scale.set( 1.1, 1.1, 1.1 );
+						if ( hp.isPinched() ) {
+							if ( ! hp.isAttached() && draggable.state != 'attached' ) {
+								draggable.state = 'to-be-attached';
+								draggable.attachedPointer = hp;
+								hp.setAttached( true );
+								// Track attached draggable per pointer
+								hp._attachedDraggable = draggable;
+							}
+						} else {
+							if ( hp.isAttached() && draggable.state == 'attached' ) {
+								draggable.state = 'to-be-detached';
+								draggable.attachedPointer = null;
+								hp.setAttached( false );
+								// Clear attached draggable
+								hp._attachedDraggable = null;
+							}
+						}
+					}
+				} else {
+					hp.setCursor( 1.5 );
+				}
+			});
 		}
-
-		ButtonSystem.queries = {
-			buttons: {
-				components: [ Button ]
-			}
 		};
 
 		class Draggable extends Component { }
