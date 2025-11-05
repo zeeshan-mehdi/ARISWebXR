@@ -521,51 +521,136 @@
 				.registerSystem( HandRaySystem, { handPointers: [ handPointer1, handPointer2 ] } );
 
 
-			// Store node references for edge creation
-			const nodeObjects = [];
-			const N = 20;
-			const lineSpacing = 0.22;
-			const lineY = 1.4;
-			const lineZ = -2.5;
-			for (let i = 0; i < N; i++) {
-				const x = (i - (N-1)/2) * lineSpacing;
-				const y = lineY;
-				const z = lineZ;
-				const object = new THREE.Mesh( new THREE.BoxGeometry( 0.15, 0.15, 0.15 ), new THREE.MeshLambertMaterial( { color: 0xffffff } ) );
-				object.position.set(x, y, z);
-				// Add a text label to the box
-				const label = createText( `Box ${i+1}`, 0.04 );
-				label.position.set( 0, 0, 0.09 );
-				object.add( label );
-				scene.add( object );
-				nodeObjects.push(object);
-				const entity = world.createEntity();
-				entity.addComponent( Intersectable );
-				entity.addComponent( Randomizable );
-				entity.addComponent( Object3D, { object: object } );
-				entity.addComponent( Draggable );
+
+			// --- BPMN Node/Edge Factories ---
+			function createBPMNNode(type, labelText, options = {}) {
+				let mesh, label, color, geom;
+				switch(type) {
+					case 'start':
+						color = 0x4caf50;
+						geom = new THREE.CircleGeometry(0.09, 32);
+						mesh = new THREE.Mesh(geom, new THREE.MeshLambertMaterial({ color }));
+						break;
+					case 'end':
+						color = 0xf44336;
+						geom = new THREE.CircleGeometry(0.09, 32);
+						mesh = new THREE.Mesh(geom, new THREE.MeshLambertMaterial({ color }));
+						break;
+					case 'gateway':
+						color = 0xffc107;
+						geom = new THREE.BoxGeometry(0.13, 0.13, 0.02);
+						mesh = new THREE.Mesh(geom, new THREE.MeshLambertMaterial({ color }));
+						mesh.rotation.z = Math.PI/4; // diamond
+						break;
+					case 'task':
+					default:
+						color = 0x2196f3;
+						geom = new THREE.BoxGeometry(0.18, 0.11, 0.02);
+						mesh = new THREE.Mesh(geom, new THREE.MeshLambertMaterial({ color }));
+						break;
+				}
+				label = createText(labelText, 0.045);
+				label.position.set(0, 0, 0.03);
+				mesh.add(label);
+				return { mesh, label };
 			}
 
-			// Create undirected edges (chain: Box 1—Box 2—...—Box 20)
-			const edgeObjects = [];
-			for (let i = 0; i < nodeObjects.length - 1; i++) {
-				const from = nodeObjects[i];
-				const to = nodeObjects[i+1];
-				// Cylinder for edge
-				const edgeGeom = new THREE.CylinderGeometry(0.025, 0.025, 1, 12);
-				const edgeMat = new THREE.MeshPhongMaterial({ color: 0xffc107, opacity: 0.85, transparent: true });
+			function createBPMNEdge(from, to, directed = false, labelText = null) {
+				// Thinner cylinder for edge
+				const edgeGeom = new THREE.CylinderGeometry(0.012, 0.012, 1, 12);
+				const edgeMat = new THREE.MeshPhongMaterial({ color: 0x888888, opacity: 0.85, transparent: true });
 				const edge = new THREE.Mesh(edgeGeom, edgeMat);
-				// Drop shadow (like arrows)
-				const shadowMat = new THREE.MeshPhongMaterial({ color: 0x000000, opacity: 0.18, transparent: true });
-				const shadow = new THREE.Mesh(edgeGeom.clone(), shadowMat);
-				shadow.position.set(0, -0.03, 0);
-				edge.add(shadow);
-				scene.add(edge);
-				edge.userData = { from, to };
+				// Arrowhead for directed edge
+				let arrow = null;
+				if (directed) {
+					const arrowGeom = new THREE.ConeGeometry(0.025, 0.07, 16);
+					const arrowMat = new THREE.MeshPhongMaterial({ color: 0x888888 });
+					arrow = new THREE.Mesh(arrowGeom, arrowMat);
+					arrow.position.y = 0.5; // end of cylinder
+					edge.add(arrow);
+				}
+				// Optional label
+				let edgeLabel = null;
+				if (labelText) {
+					edgeLabel = createText(labelText, 0.035);
+					edgeLabel.position.set(0, 0.07, 0.03);
+					edge.add(edgeLabel);
+				}
+				edge.userData = { from, to, arrow, edgeLabel };
+				return edge;
+			}
+
+			// --- BPMN Example Graph ---
+			// Parent all nodes/edges to a group for robust placement
+			const graphGroup = new THREE.Group();
+			scene.add(graphGroup);
+			const nodeObjects = [];
+			const labelObjects = [];
+			// Example BPMN: Start -> Task -> Gateway -> Task1/Task2 -> End
+			const bpmnNodes = [
+				{ type: 'start', label: 'Start' },
+				{ type: 'task', label: 'Task A' },
+				{ type: 'gateway', label: 'XOR' },
+				{ type: 'task', label: 'Task B' },
+				{ type: 'task', label: 'Task C' },
+				{ type: 'end', label: 'End' }
+			];
+			// Layout: horizontal flow, all z=0 (local to group)
+			const x0 = 0, y0 = 1.4;
+			const hSpacing = 0.32;
+			for (let i = 0; i < bpmnNodes.length; i++) {
+				const { type, label } = bpmnNodes[i];
+				const { mesh, label: textLabel } = createBPMNNode(type, label);
+				mesh.position.set(x0 + i * hSpacing, 0, 0); // y=0, z=0 local to group
+				graphGroup.add(mesh);
+				nodeObjects.push(mesh);
+				labelObjects.push(textLabel);
+				const entity = world.createEntity();
+				entity.addComponent(Intersectable);
+				entity.addComponent(Object3D, { object: mesh });
+				entity.addComponent(Draggable);
+			}
+
+			// Edges: Start->TaskA, TaskA->Gateway, Gateway->TaskB, Gateway->TaskC, TaskB->End, TaskC->End
+			const edgeObjects = [];
+			function addEdge(i, j, directed = true, label = null) {
+				const edge = createBPMNEdge(nodeObjects[i], nodeObjects[j], directed, label);
+				graphGroup.add(edge);
 				edgeObjects.push(edge);
 			}
+			addEdge(0, 1, true);
+			addEdge(1, 2, true);
+			addEdge(2, 3, true, 'Yes');
+			addEdge(2, 4, true, 'No');
+			addEdge(3, 5, true);
+			addEdge(4, 5, true);
 
-			// Update edges every frame to follow nodes
+			// Place the group in front of the user and attach to XR rig on session start
+			renderer.xr.addEventListener('sessionstart', () => {
+				const xrCamera = renderer.xr.getCamera();
+				const rig = xrCamera.parent;
+				if (rig && graphGroup.parent !== rig) {
+					rig.add(graphGroup);
+					graphGroup.position.set(0, y0, -1.5);
+					graphGroup.rotation.set(0, 0, 0);
+				}
+			});
+			renderer.xr.addEventListener('sessionend', () => {
+				if (graphGroup.parent !== scene) {
+					scene.add(graphGroup);
+					graphGroup.position.set(0, 0, 0);
+					graphGroup.rotation.set(0, 0, 0);
+				}
+			});
+
+			// Edge update: use local positions (no world transforms)
+			const fromPos = new THREE.Vector3();
+			const toPos = new THREE.Vector3();
+			const mid = new THREE.Vector3();
+			const dir = new THREE.Vector3();
+			const up = new THREE.Vector3(0, 1, 0);
+			const camWorldPos = new THREE.Vector3();
+
 			renderer.setAnimationLoop(function animate() {
 				// Update ECS world and render as before
 				const delta = clock.getDelta();
@@ -573,27 +658,31 @@
 				renderer.xr.updateCamera( camera );
 				world.execute( delta, elapsedTime );
 
-				// Update edge positions
+				// Update edge positions (local to graphGroup)
 				edgeObjects.forEach(edge => {
 					const from = edge.userData.from;
 					const to = edge.userData.to;
-					from.updateMatrixWorld();
-					to.updateMatrixWorld();
-					const fromPos = new THREE.Vector3();
-					const toPos = new THREE.Vector3();
-					from.getWorldPosition(fromPos);
-					to.getWorldPosition(toPos);
-					const mid = fromPos.clone().lerp(toPos, 0.5);
+					fromPos.copy(from.position);
+					toPos.copy(to.position);
+					dir.subVectors(toPos, fromPos);
+					const length = dir.length();
+					mid.copy(fromPos).add(toPos).multiplyScalar(0.5);
 					edge.position.copy(mid);
-					const diff = toPos.clone().sub(fromPos);
-					edge.scale.set(1, diff.length() / 1, 1);
-					edge.lookAt(toPos);
-					edge.rotateX(Math.PI / 2);
+					edge.scale.set(1, length, 1);
+					edge.quaternion.setFromUnitVectors(up, dir.clone().normalize());
 				});
 
-				// Camera always looks at the center of the line
-				camera.position.set(0, lineY, 0.3);
-				camera.lookAt(0, lineY, lineZ);
+				// Make labels face the camera (headset)
+				renderer.xr.getCamera().getWorldPosition(camWorldPos);
+				labelObjects.forEach(label => {
+					label.lookAt(camWorldPos);
+				});
+
+				// Only update camera in non-XR mode
+				if (!renderer.xr.isPresenting) {
+					camera.position.set(0, y0, 0.3);
+					camera.lookAt(x0 + (bpmnNodes.length-1)*hSpacing/2, y0, -1.5);
+				}
 				renderer.render( scene, camera );
 			});
 
