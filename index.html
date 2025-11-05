@@ -607,6 +607,59 @@
 				entity.addComponent(Draggable);
 			}
 
+			// --- Add draggable handle below the process ---
+			// Compute handle width based on node layout
+			const handleWidth = (bpmnNodes.length - 1) * hSpacing + 0.22;
+			const handleHeight = 0.035;
+			const handleY = -0.18; // just below nodes (adjust as needed)
+			const handleGeom = new THREE.BoxGeometry(handleWidth, handleHeight, 0.025);
+			const handleMat = new THREE.MeshPhongMaterial({ color: 0x888888, opacity: 0.7, transparent: true });
+			const handleMesh = new THREE.Mesh(handleGeom, handleMat);
+			handleMesh.position.set(x0 + (bpmnNodes.length-1)*hSpacing/2, handleY, 0);
+			graphGroup.add(handleMesh);
+
+			// Make handle draggable: when dragged, move the whole graphGroup
+			const handleEntity = world.createEntity();
+			handleEntity.addComponent(Intersectable);
+			handleEntity.addComponent(Object3D, { object: handleMesh });
+			// Custom Draggable for group movement
+			class GroupDraggable extends Draggable {}
+			GroupDraggable.schema = Draggable.schema;
+			handleEntity.addComponent(GroupDraggable);
+
+			// Patch DraggableSystem to move group if GroupDraggable
+			const origDraggableSystemExecute = DraggableSystem.prototype.execute;
+			DraggableSystem.prototype.execute = function() {
+				this.queries.draggable.results.forEach(entity => {
+					const draggable = entity.getMutableComponent(Draggable);
+					const object = entity.getComponent(Object3D).object;
+					if (draggable.originalParent == null) {
+						draggable.originalParent = object.parent;
+					}
+					switch (draggable.state) {
+						case 'to-be-attached':
+							draggable.attachedPointer.children[0].attach(object);
+							draggable.state = 'attached';
+							// If this is the handle, move the group instead
+							if (object === handleMesh) {
+								// Attach the whole group to the pointer
+								draggable.attachedPointer.children[0].attach(graphGroup);
+							}
+							break;
+						case 'to-be-detached':
+							draggable.originalParent.attach(object);
+							draggable.state = 'detached';
+							// If this is the handle, detach the group
+							if (object === handleMesh) {
+								draggable.originalParent.attach(graphGroup);
+							}
+							break;
+						default:
+							object.scale.set(1, 1, 1);
+					}
+				});
+			};
+
 			// Edges: Start->TaskA, TaskA->Gateway, Gateway->TaskB, Gateway->TaskC, TaskB->End, TaskC->End
 			const edgeObjects = [];
 			function addEdge(i, j, directed = true, label = null) {
