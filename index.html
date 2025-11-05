@@ -607,27 +607,30 @@
 				entity.addComponent(Draggable);
 			}
 
-			// --- Add draggable handle below the process ---
-			// Compute handle width based on node layout
-			const handleWidth = (bpmnNodes.length - 1) * hSpacing + 0.22;
-			const handleHeight = 0.035;
-			const handleY = -0.18; // just below nodes (adjust as needed)
-			const handleGeom = new THREE.BoxGeometry(handleWidth, handleHeight, 0.025);
-			const handleMat = new THREE.MeshPhongMaterial({ color: 0x888888, opacity: 0.7, transparent: true });
-			const handleMesh = new THREE.Mesh(handleGeom, handleMat);
-			handleMesh.position.set(x0 + (bpmnNodes.length-1)*hSpacing/2, handleY, 0);
-			graphGroup.add(handleMesh);
+			// --- Add capsule-shaped draggable handle below the process ---
+			// Capsule parameters
+			const capsuleWidth = 0.22;
+			const capsuleHeight = 0.035;
+			const capsuleY = -0.18;
+			// Capsule geometry: use a cylinder with hemispherical ends
+			const capsuleGeom = new THREE.CapsuleGeometry(capsuleWidth/2, capsuleHeight, 16, 32);
+			const capsuleMat = new THREE.MeshPhongMaterial({ color: 0xffffff, opacity: 0.7, transparent: true });
+			const capsuleMesh = new THREE.Mesh(capsuleGeom, capsuleMat);
+			capsuleMesh.position.set(x0 + (bpmnNodes.length-1)*hSpacing/2, capsuleY, 0);
+			capsuleMesh.castShadow = false;
+			capsuleMesh.receiveShadow = false;
+			graphGroup.add(capsuleMesh);
 
-			// Make handle draggable: when dragged, move the whole graphGroup
+			// Make capsule draggable: when dragged, move the whole graphGroup
 			const handleEntity = world.createEntity();
 			handleEntity.addComponent(Intersectable);
-			handleEntity.addComponent(Object3D, { object: handleMesh });
+			handleEntity.addComponent(Object3D, { object: capsuleMesh });
 			// Custom Draggable for group movement
 			class GroupDraggable extends Draggable {}
 			GroupDraggable.schema = Draggable.schema;
 			handleEntity.addComponent(GroupDraggable);
 
-			// Patch DraggableSystem to move group if GroupDraggable
+			// Patch DraggableSystem to move group if GroupDraggable, and add visual feedback
 			const origDraggableSystemExecute = DraggableSystem.prototype.execute;
 			DraggableSystem.prototype.execute = function() {
 				this.queries.draggable.results.forEach(entity => {
@@ -636,13 +639,22 @@
 					if (draggable.originalParent == null) {
 						draggable.originalParent = object.parent;
 					}
+					// Visual feedback for capsule handle
+					if (object === capsuleMesh) {
+						if (draggable.state === 'attached' || draggable.state === 'to-be-attached') {
+							object.scale.set(1.2, 1.2, 1.2);
+						} else if (draggable.state === 'hovered') {
+							object.scale.set(1.1, 1.1, 1.1);
+						} else {
+							object.scale.set(1, 1, 1);
+						}
+					}
 					switch (draggable.state) {
 						case 'to-be-attached':
 							draggable.attachedPointer.children[0].attach(object);
 							draggable.state = 'attached';
 							// If this is the handle, move the group instead
-							if (object === handleMesh) {
-								// Attach the whole group to the pointer
+							if (object === capsuleMesh) {
 								draggable.attachedPointer.children[0].attach(graphGroup);
 							}
 							break;
@@ -650,12 +662,12 @@
 							draggable.originalParent.attach(object);
 							draggable.state = 'detached';
 							// If this is the handle, detach the group
-							if (object === handleMesh) {
+							if (object === capsuleMesh) {
 								draggable.originalParent.attach(graphGroup);
 							}
 							break;
 						default:
-							object.scale.set(1, 1, 1);
+							if (object !== capsuleMesh) object.scale.set(1, 1, 1);
 					}
 				});
 			};
