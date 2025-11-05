@@ -466,6 +466,7 @@
 			const floorMaterial = new THREE.MeshPhongMaterial( { color: 0x222222 } );
 			const floor = new THREE.Mesh( floorGeometry, floorMaterial );
 			floor.rotation.x = - Math.PI / 2;
+			floor.position.y = -0.05; // slightly below zero to avoid intersection
 			floor.receiveShadow = true;
 			scene.add( floor );
 
@@ -595,13 +596,14 @@
 				{ type: 'task', label: 'Task C' },
 				{ type: 'end', label: 'End' }
 			];
-			// Layout: horizontal flow, all z=0 (local to group)
-			const x0 = 0, y0 = 1.4;
+			// Layout: horizontal flow, centered vertically in group
+			const x0 = 0, y0 = 0; // group y will be set for world height
 			const hSpacing = 0.32;
+			const vCenter = 0; // for single row, y=0; for grid, offset as needed
 			for (let i = 0; i < bpmnNodes.length; i++) {
 				const { type, label } = bpmnNodes[i];
 				const { mesh, label: textLabel } = createBPMNNode(type, label);
-				mesh.position.set(x0 + i * hSpacing, 0, 0); // y=0, z=0 local to group
+				mesh.position.set(x0 + i * hSpacing, vCenter, 0); // y centered in group
 				graphGroup.add(mesh);
 				nodeObjects.push(mesh);
 				labelObjects.push(textLabel);
@@ -626,12 +628,15 @@
 			addEdge(4, 5, true);
 
 			// Place the group in front of the user and attach to XR rig on session start
+			// Ensure reference space is 'local' (not 'local-floor' or 'bounded-floor')
+			renderer.xr.setReferenceSpaceType('local');
+
 			renderer.xr.addEventListener('sessionstart', () => {
 				const xrCamera = renderer.xr.getCamera();
 				const rig = xrCamera.parent;
 				if (rig && graphGroup.parent !== rig) {
 					rig.add(graphGroup);
-					graphGroup.position.set(0, y0, -1.5);
+					graphGroup.position.set(0, 1.4, -1.5); // float at head height in front
 					graphGroup.rotation.set(0, 0, 0);
 				}
 			});
