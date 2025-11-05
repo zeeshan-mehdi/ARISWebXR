@@ -607,30 +607,39 @@
 				entity.addComponent(Draggable);
 			}
 
-			// --- Add capsule-shaped draggable handle below the process ---
-			// Capsule parameters
-			const capsuleWidth = 0.22;
-			const capsuleHeight = 0.035;
-			const capsuleY = -0.18;
-			// Capsule geometry: use a cylinder with hemispherical ends
-			const capsuleGeom = new THREE.CapsuleGeometry(capsuleWidth/2, capsuleHeight, 16, 32);
-			const capsuleMat = new THREE.MeshPhongMaterial({ color: 0xffffff, opacity: 0.7, transparent: true });
-			const capsuleMesh = new THREE.Mesh(capsuleGeom, capsuleMat);
-			capsuleMesh.position.set(x0 + (bpmnNodes.length-1)*hSpacing/2, capsuleY, 0);
-			capsuleMesh.castShadow = false;
-			capsuleMesh.receiveShadow = false;
-			graphGroup.add(capsuleMesh);
+			// --- Add small, flat, rounded-rectangle handle below the process ---
+			const handleWidth = 0.18;
+			const handleHeight = 0.018;
+			const handleRadius = 0.009;
+			const handleY = -0.14;
+			// Create a rounded rectangle shape
+			const shape = new THREE.Shape();
+			const w = handleWidth, h = handleHeight, r = handleRadius;
+			shape.absarc(-w/2 + r, -h/2 + r, r, Math.PI, Math.PI*1.5, false);
+			shape.absarc(w/2 - r, -h/2 + r, r, Math.PI*1.5, 0, false);
+			shape.absarc(w/2 - r, h/2 - r, r, 0, Math.PI*0.5, false);
+			shape.absarc(-w/2 + r, h/2 - r, r, Math.PI*0.5, Math.PI, false);
+			const extrudeSettings = { depth: 0.01, bevelEnabled: false };
+			const handleGeom = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+			const handleMat = new THREE.MeshPhongMaterial({ color: 0xf0f0f0, opacity: 0.85, transparent: true });
+			const handleMesh = new THREE.Mesh(handleGeom, handleMat);
+			handleMesh.position.set(x0 + (bpmnNodes.length-1)*hSpacing/2, handleY, 0);
+			handleMesh.castShadow = false;
+			handleMesh.receiveShadow = false;
+			// Add a subtle border
+			const borderGeom = new THREE.EdgesGeometry(handleGeom);
+			const borderMat = new THREE.LineBasicMaterial({ color: 0x888888, linewidth: 2 });
+			const border = new THREE.LineSegments(borderGeom, borderMat);
+			handleMesh.add(border);
+			graphGroup.add(handleMesh);
 
-			// Make capsule draggable: when dragged, move the whole graphGroup
+			// Make handle draggable: when dragged, move the whole graphGroup
 			const handleEntity = world.createEntity();
 			handleEntity.addComponent(Intersectable);
-			handleEntity.addComponent(Object3D, { object: capsuleMesh });
-			// Custom Draggable for group movement
-			class GroupDraggable extends Draggable {}
-			GroupDraggable.schema = Draggable.schema;
-			handleEntity.addComponent(GroupDraggable);
+			handleEntity.addComponent(Object3D, { object: handleMesh });
+			handleEntity.addComponent(Draggable);
 
-			// Patch DraggableSystem to move group if GroupDraggable, and add visual feedback
+			// Patch DraggableSystem to move group if handle is dragged, and add visual feedback
 			const origDraggableSystemExecute = DraggableSystem.prototype.execute;
 			DraggableSystem.prototype.execute = function() {
 				this.queries.draggable.results.forEach(entity => {
@@ -639,14 +648,17 @@
 					if (draggable.originalParent == null) {
 						draggable.originalParent = object.parent;
 					}
-					// Visual feedback for capsule handle
-					if (object === capsuleMesh) {
+					// Visual feedback for handle (flat bar)
+					if (object === handleMesh) {
 						if (draggable.state === 'attached' || draggable.state === 'to-be-attached') {
-							object.scale.set(1.2, 1.2, 1.2);
+							object.scale.set(1.15, 1.15, 1.15);
+							object.material.opacity = 1.0;
 						} else if (draggable.state === 'hovered') {
-							object.scale.set(1.1, 1.1, 1.1);
+							object.scale.set(1.08, 1.08, 1.08);
+							object.material.opacity = 0.95;
 						} else {
 							object.scale.set(1, 1, 1);
+							object.material.opacity = 0.85;
 						}
 					}
 					switch (draggable.state) {
@@ -654,7 +666,7 @@
 							draggable.attachedPointer.children[0].attach(object);
 							draggable.state = 'attached';
 							// If this is the handle, move the group instead
-							if (object === capsuleMesh) {
+							if (object === handleMesh) {
 								draggable.attachedPointer.children[0].attach(graphGroup);
 							}
 							break;
@@ -662,12 +674,12 @@
 							draggable.originalParent.attach(object);
 							draggable.state = 'detached';
 							// If this is the handle, detach the group
-							if (object === capsuleMesh) {
+							if (object === handleMesh) {
 								draggable.originalParent.attach(graphGroup);
 							}
 							break;
 						default:
-							if (object !== capsuleMesh) object.scale.set(1, 1, 1);
+							if (object !== handleMesh) object.scale.set(1, 1, 1);
 					}
 				});
 			};
